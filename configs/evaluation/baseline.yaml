@@ -1,0 +1,41 @@
+# Base-checkpoint selection benchmark: both candidates, every task, dense / BM25 / hybrid.
+# Build the data first (see README "Benchmarks"):
+#   scripts/prepare_dataset.py clone | localization | docstrings | import-coir
+models:
+  - configs/models/coderankembed.yaml
+  - configs/models/gte-modernbert.yaml
+tasks:
+  # Issue-to-code localization (Python + TypeScript): post-release commit message -> files/functions it changed,
+  # repository indexed at the parent commit.
+  - name: temporal-localization
+    type: localization
+    path: data/eval/temporal-localization/cases.jsonl
+    repos_dir: data/repos
+    contamination_note: temporal-commits
+  # NL -> code over held-out repositories, docstrings removed from the code (Python + TypeScript).
+  - name: docstrings-python
+    type: retrieval
+    path: data/eval/docstrings-python
+  - name: docstrings-typescript
+    type: retrieval
+    path: data/eval/docstrings-typescript
+  # Public NL -> code benchmarks (CoIR mirrors at pinned revisions).
+  - name: csn-python
+    type: retrieval
+    path: data/eval/csn-python
+    contamination_note: codesearchnet
+  - name: csn-javascript
+    type: retrieval
+    path: data/eval/csn-javascript
+    contamination_note: codesearchnet
+  - name: cosqa
+    type: retrieval
+    path: data/eval/cosqa
+    contamination_note: codesearchnet
+output_dir: artifacts/eval/baseline
+ks: [1, 5, 10, 20]
+retrieval_modes: [dense, bm25, hybrid]
+primary_metric: ndcg@10
+bootstrap_samples: 1000
+seed: 13
+cache_dir: artifacts/cache

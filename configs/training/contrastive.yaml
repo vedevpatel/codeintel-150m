@@ -1,0 +1,41 @@
+# Contrastive fine-tuning recipe. `model` is the base checkpoint chosen from the baseline benchmark.
+model: configs/models/gte-modernbert.yaml
+train_files:
+  - data/train/train.jsonl
+output_dir: artifacts/checkpoints/contrastive-v1
+# Model selection during training uses commits from *training* repositories after the training cutoff
+# (`prepare_dataset.py localization --role train --since <cutoff>`), never the held-out eval repositories.
+dev_task:
+  name: localization-dev
+  type: localization
+  path: data/dev/localization/cases.jsonl
+  repos_dir: data/repos
+# Up-weight the localization signal without letting it crowd out general NL->code and navigation pairs.
+source_weights:
+  commits: 2.0
+  docstring: 1.0
+  calls: 0.5
+  tests: 0.5
+learning_rate: 2.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.05
+epochs: 1
+batch_size: 128
+# GradCache sub-batches keep 128 in-batch negatives within MPS / small-GPU memory.
+mini_batch_size: 16
+hard_negatives: 1
+temperature: 0.05
+symmetric_loss: true
+matryoshka_dims: [256, 512]
+# Anti-forgetting: KL to the frozen base model's in-batch similarity distribution.
+distill_weight: 0.2
+distill_temperature: 0.05
+max_query_length: 512
+max_document_length: 1024
+gradient_checkpointing: true
+precision: auto
+eval_every: 500
+log_every: 25
+seed: 13
+# WiSE-FT: also save 0.7 * fine-tuned + 0.3 * base.
+interpolate_alpha: 0.7

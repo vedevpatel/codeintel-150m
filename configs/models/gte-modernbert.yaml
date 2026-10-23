@@ -1,0 +1,10 @@
+# Alibaba-NLP/gte-modernbert-base -- 149M, Apache-2.0 (per model card at this revision).
+name: gte-modernbert
+adapter: modernbert
+repo_id: Alibaba-NLP/gte-modernbert-base
+revision: e7f32e3c00f91d699e8c43b53106206bcc72bb22
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

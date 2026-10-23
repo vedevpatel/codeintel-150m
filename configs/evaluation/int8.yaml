@@ -1,0 +1,23 @@
+# Ranking impact of INT8 export. Models are passed on the command line as ONNX exports, e.g.
+#   scripts/benchmark_models.py --config configs/evaluation/int8.yaml --out artifacts/benchmarks/int8 \
+#     --extra-models onnx:artifacts/onnx/gte-modernbert:float32 onnx:artifacts/onnx/gte-modernbert:int8 \
+#                    onnx:artifacts/onnx/coderankembed:float32 onnx:artifacts/onnx/coderankembed:int8
+models: []
+tasks:
+  - name: docstrings-python
+    type: retrieval
+    path: data/eval/docstrings-python
+  - name: docstrings-typescript
+    type: retrieval
+    path: data/eval/docstrings-typescript
+  - name: csn-javascript
+    type: retrieval
+    path: data/eval/csn-javascript
+    contamination_note: codesearchnet
+output_dir: artifacts/eval/int8
+ks: [1, 5, 10, 20]
+retrieval_modes: [dense]
+primary_metric: ndcg@10
+bootstrap_samples: 1000
+seed: 13
+cache_dir: artifacts/cache

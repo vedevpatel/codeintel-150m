@@ -1,0 +1,16 @@
+# nomic-ai/CodeRankEmbed -- 137M, MIT (per model card at this revision).
+name: coderankembed
+adapter: coderank
+repo_id: nomic-ai/CodeRankEmbed
+revision: 3c4b60807d71f79b43f3c4363786d9493691f8b1
+# NomicBERT is not a native transformers architecture, so the repository's modeling code must run.
+# It was reviewed at the revision above; loading aborts unless every .py file matches these hashes.
+trust_remote_code: true
+remote_code_sha256:
+  configuration_hf_nomic_bert.py: 8632792e922e62ab1a6feaab15baf406e223c0547a21de23ab4f520b2b36d674
+  modeling_hf_nomic_bert.py: 502ccfb9c2d5dac976109ac2f04dc3125d8540329e5d4af92bc587d6dc65edcd
+device: auto
+dtype: auto
+# The model supports 8192 tokens; 1024 covers function-level chunks and issue text at a fraction of the cost.
+max_length: 1024
+batch_size: 32

@@ -1,9 +1,12 @@
 import json
 
+from codeintel.data.licenses import LicenseChecker, detect_licenses, is_permissive
 from codeintel.data.schemas import TrainingPair
 from codeintel.data.splits import assign_split, group_leakage, split_by_group, temporal_split
 from codeintel.data.validation import validate_localization, validate_retrieval_dir, validate_training
 from codeintel.evaluation.contamination import decontaminate, exact_key, overlap_report
+
+from .conftest import git
 
 
 def test_assign_split_is_deterministic_and_roughly_proportional():
@@ -50,7 +53,8 @@ def test_decontaminate_drops_overlapping_records():
 def test_validate_training(tmp_path):
     path = tmp_path / "t.jsonl"
     rows = [
-        {"query": "parse json", "positive": "def parse(): ...", "task": "nl2code", "source": "docstring"},
+        {"query": "parse json", "positive": "def parse(): ...", "task": "nl2code", "source": "docstring", "license": "MIT"},
+        {"query": "read csv", "positive": "def read(): ...", "task": "nl2code", "source": "docstring", "license": "GPL-3.0-only"},
         {"query": "same", "positive": "same", "task": "nl2code", "source": "docstring"},
         {"query": "q", "positive": "p", "task": "nonsense", "source": "x"},
         {"query": "q", "positive": "p", "task": "nl2code", "source": "x", "typo_field": 1},
@@ -61,6 +65,8 @@ def test_validate_training(tmp_path):
     assert any("trivial" in e for e in report.errors)
     assert any("unknown task" in e for e in report.errors)
     assert any("unknown fields" in e for e in report.errors)
+    assert not any(e.startswith("line 1:") for e in report.errors)
+    assert any(e.startswith("line 2:") and "not permissive" in e for e in report.errors)
 
 
 def test_validate_localization_paths(tmp_path):
@@ -103,3 +109,42 @@ def test_collapse_duplicates_remaps_judgements():
     kept, qrels, merged = collapse_duplicates(corpus, [Qrel("q1", "d3"), Qrel("q2", "d2")])
     assert [d.id for d in kept] == ["d1", "d2"] and merged == 1
     assert sorted((q.query_id, q.doc_id) for q in qrels) == [("q1", "d1"), ("q2", "d2")]
+
+
+MIT_TEXT = """MIT License
+
+Copyright (c) 2024 Someone
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the "Software"), to deal in the Software
+without restriction.
+"""
+GPL_TEXT = """                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+"""
+
+
+def test_licence_expressions_and_detection():
+    assert is_permissive("MIT") and is_permissive("MIT OR Apache-2.0") and is_permissive("GPL-2.0-only OR MIT")
+    assert not is_permissive("") and not is_permissive("MIT AND GPL-3.0-only") and not is_permissive("LGPL-2.1")
+    assert detect_licenses(MIT_TEXT) == {"MIT"}
+    assert detect_licenses(MIT_TEXT + "\nbundled/foo.c:\n" + GPL_TEXT) == {"MIT", "GPL-family"}
+    bsd3 = "Redistribution and use in source and binary forms, with or without\nmodification ... Neither the name of"
+    assert detect_licenses(bsd3) == {"BSD-3-Clause"}
+    assert detect_licenses("All rights reserved.") == set()
+
+
+def test_licence_checker_follows_history(git_repo):
+    (git_repo / "LICENSE").write_text(MIT_TEXT)
+    git(git_repo, "add", "LICENSE")
+    git(git_repo, "commit", "-q", "-m", "Add MIT licence")
+    checker = LicenseChecker(git_repo, "MIT")
+    assert checker.problem("HEAD") is None
+    assert checker.problem("HEAD~1") == "no licence file at the repository root"  # before the licence existed
+    assert "not permissive" in LicenseChecker(git_repo, "GPL-3.0-only").problem("HEAD")
+    assert "declared 'Apache-2.0'" in LicenseChecker(git_repo, "Apache-2.0").problem("HEAD")
+
+    (git_repo / "LICENSE").write_text(GPL_TEXT)
+    git(git_repo, "commit", "-q", "-am", "Relicense under the GPL")
+    assert "GPL-family" in checker.problem("HEAD")
+    assert checker.problem("HEAD~1") is None

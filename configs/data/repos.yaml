@@ -2,14 +2,17 @@
 #
 # role: eval  -> held out. Used for the temporal localization benchmark; never mined for training pairs.
 # role: train -> mined for training pairs (commits strictly before the training cutoff).
+# license: SPDX expression, required for every repo and recorded in repos.lock.json. Train repos must be
+#          permissive (codeintel.data.licenses.PERMISSIVE); `pairs` checks the declaration against the licence
+#          files at every mined revision and skips the repo or commit on any mismatch.
 #
 # Evaluation commits are taken after both candidate checkpoints were published (2025-01-20), so commit
 # messages cannot have been in either candidate's training data.
 shallow_since: "2025-01-01"
 repos:
-  - {name: pytest, url: https://github.com/pytest-dev/pytest, language: python, role: eval}
-  - {name: pip, url: https://github.com/pypa/pip, language: python, role: eval}
-  - {name: textual, url: https://github.com/Textualize/textual, language: python, role: eval}
-  - {name: vue-core, url: https://github.com/vuejs/core, language: typescript, role: eval}
-  - {name: hono, url: https://github.com/honojs/hono, language: typescript, role: eval}
-  - {name: vite, url: https://github.com/vitejs/vite, language: typescript, role: eval}
+  - {name: pytest, url: https://github.com/pytest-dev/pytest, language: python, license: MIT, role: eval}
+  - {name: pip, url: https://github.com/pypa/pip, language: python, license: MIT, role: eval}
+  - {name: textual, url: https://github.com/Textualize/textual, language: python, license: MIT, role: eval}
+  - {name: vue-core, url: https://github.com/vuejs/core, language: typescript, license: MIT, role: eval}
+  - {name: hono, url: https://github.com/honojs/hono, language: typescript, license: MIT, role: eval}
+  - {name: vite, url: https://github.com/vitejs/vite, language: typescript, license: MIT, role: eval}

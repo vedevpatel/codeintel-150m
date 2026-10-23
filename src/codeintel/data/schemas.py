@@ -64,6 +64,9 @@ class LocalizationCase:
     language: str = ""
     created_at: str = ""
     source: str = ""
+    # Stratification labels reported separately by the runner, e.g. {"language": "python", "mentions": "descriptive"}.
+    tags: dict[str, str] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +79,7 @@ class TrainingPair:
     language: str = ""
     repo: str = ""
     id: str = ""
+    license: str = ""  # SPDX expression of the source; validate_training only accepts permissive ones
     meta: dict[str, Any] = field(default_factory=dict)
 
 

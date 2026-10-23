@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from codeintel.data.licenses import is_permissive
 from codeintel.data.schemas import (
     TRAINING_TASKS,
     CorpusDoc,
@@ -72,6 +73,8 @@ def validate_training(path: str | Path) -> ValidationReport:
             report.error(f"{where}: unknown task {rec.task!r} (expected one of {sorted(TRAINING_TASKS)})")
         if not rec.source:
             report.error(f"{where}: missing source")
+        if not is_permissive(rec.license):
+            report.error(f"{where}: licence {rec.license!r} is missing or not permissive")
         if len(rec.query) > MAX_TEXT_CHARS or len(rec.positive) > MAX_TEXT_CHARS:
             report.warn(f"{where}: text longer than {MAX_TEXT_CHARS} chars")
         qk, pk = exact_key(rec.query), exact_key(rec.positive)

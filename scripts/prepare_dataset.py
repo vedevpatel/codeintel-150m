@@ -27,6 +27,7 @@ from pathlib import Path
 import yaml
 
 from codeintel.data import validation
+from codeintel.data.licenses import LicenseChecker
 from codeintel.data.mining import candidate_commits, dedupe_pairs, mine_commits, mine_snapshot, snapshot_files
 from codeintel.data.schemas import (
     CorpusDoc,
@@ -43,7 +44,11 @@ from codeintel.evaluation.contamination import decontaminate
 
 def load_manifest(path: str) -> dict:
     with open(path) as f:
-        return yaml.safe_load(f)
+        manifest = yaml.safe_load(f)
+    missing = [r.get("name", "?") for r in manifest["repos"] if not str(r.get("license", "")).strip()]
+    if missing:
+        raise SystemExit(f"{path}: repos without a declared SPDX licence: {missing}")
+    return manifest
 
 
 def repos_with_role(manifest: dict, role: str) -> list[dict]:
@@ -64,9 +69,12 @@ def cmd_clone(args) -> int:
             print("+", " ".join(cmd), flush=True)
             subprocess.run(cmd, check=True)
         head = subprocess.run(["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-        lock[repo["name"]] = {"url": repo["url"], "head": head}
+        problem = LicenseChecker(dest, repo["license"]).problem(head)
+        if problem and repo.get("role") == "train":
+            print(f"WARNING {repo['name']}: {problem} -- `pairs` will skip it", flush=True)
+        lock[repo["name"]] = {"url": repo["url"], "head": head, "license": repo["license"], "license_problem": problem}
     (out / "repos.lock.json").write_text(json.dumps(lock, indent=2))
-    print(f"recorded HEADs in {out / 'repos.lock.json'}")
+    print(f"recorded HEADs and licences in {out / 'repos.lock.json'}")
     return 0
 
 
@@ -150,13 +158,31 @@ def _eval_texts(paths: list[str]) -> list[str]:
 def cmd_pairs(args) -> int:
     manifest = load_manifest(args.manifest)
     pairs: list[TrainingPair] = []
+    skipped: dict[str, str] = {}
     for repo in repos_with_role(manifest, "train"):
         repo_dir = Path(args.repos_dir) / repo["name"]
+        # Only permissively licensed code is trained on, checked at every revision code is taken from.
+        licence = LicenseChecker(repo_dir, repo["license"])
+        if (problem := licence.problem(args.snapshot_rev)) is not None:
+            skipped[repo["name"]] = problem
+            print(f"{repo['name']}: SKIPPED ({problem})", flush=True)
+            continue
+        repo_pairs = []
         mined = mine_snapshot(snapshot_files(repo_dir, rev=args.snapshot_rev), repo["name"])
-        pairs += mined.docstring + mined.tests + mined.calls
+        repo_pairs += mined.docstring + mined.tests + mined.calls
+        dropped_commits = 0
         for ex in mine_commits(repo_dir, until=args.until):
-            pairs += ex.to_pairs(repo["name"])
-        print(f"{repo['name']}: {len(pairs)} pairs so far", flush=True)
+            if licence.problem(ex.commit.parent) is not None:
+                dropped_commits += 1
+                continue
+            repo_pairs += ex.to_pairs(repo["name"])
+        for p in repo_pairs:
+            p.license = repo["license"]
+        pairs += repo_pairs
+        note = f", {dropped_commits} commits dropped (licence at parent)" if dropped_commits else ""
+        print(f"{repo['name']} [{repo['license']}]: {len(repo_pairs)} pairs{note}", flush=True)
+    if skipped:
+        print(f"skipped {len(skipped)} train repos for licence reasons: {skipped}")
     pairs = dedupe_pairs(pairs)
     eval_repos = {r["name"] for r in repos_with_role(manifest, "eval")}
     pairs, stats = decontaminate(pairs, _eval_texts(args.eval_tasks), blocked_repos=eval_repos)

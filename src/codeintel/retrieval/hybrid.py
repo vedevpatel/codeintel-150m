@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 MODES = ("dense", "bm25", "hybrid")
 
 
+def split_mode(mode: str) -> tuple[str, float | None]:
+    """"hybrid@2.0" -> ("hybrid", 2.0): the dense weight in RRF (BM25 weight stays 1). Plain modes -> (mode, None)."""
+    base, _, weight = mode.partition("@")
+    return base, (float(weight) if weight else None)
+
+
 def reciprocal_rank_fusion(
     rankings: Sequence[Sequence[int]], k: int = 60, weights: Sequence[float] | None = None
 ) -> list[tuple[int, float]]:
@@ -41,7 +47,7 @@ def symbol_key(chunk: Chunk) -> str:
 def aggregate(
     hits: Sequence[tuple[int, float]], chunks: Sequence[Chunk], key: Callable[[Chunk], str], k: int | None = None
 ) -> list[SearchHit]:
-    """Collapse ranked chunk hits to unique keys (files, symbols) by max score, keeping first-seen order."""
+    """Collapse ranked chunk hits to unique keys (files, symbols); each key keeps its best-ranked hit's score."""
     best: dict[str, tuple[float, int]] = {}
     for order, (idx, score) in enumerate(hits):
         kk = key(chunks[idx])
@@ -86,8 +92,10 @@ class Retriever:
 
     def search_many(self, queries: Sequence[str], k: int = 10, mode: str = "hybrid") -> list[list[tuple[int, float]]]:
         """Ranked (chunk_index, score) lists, one per query."""
+        mode, weight = split_mode(mode)
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
+        dense_weight = self.dense_weight if weight is None else weight
         depth = max(k, self.candidates)
         dense_hits = None
         if mode in ("dense", "hybrid"):
@@ -102,7 +110,7 @@ class Retriever:
         assert dense_hits is not None
         return [
             reciprocal_rank_fusion(
-                [[i for i, _ in d], [i for i, _ in b]], k=self.rrf_k, weights=[self.dense_weight, self.bm25_weight]
+                [[i for i, _ in d], [i for i, _ in b]], k=self.rrf_k, weights=[dense_weight, self.bm25_weight]
             )[:k]
             for d, b in zip(dense_hits, lexical)
         ]

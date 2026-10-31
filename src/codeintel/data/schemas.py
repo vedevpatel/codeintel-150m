@@ -22,6 +22,7 @@ TRAINING_TASKS = frozenset(
         "nl2code",  # natural-language description / docstring -> implementation
         "issue2code",  # issue or commit message -> code that changed
         "code2code",  # related implementation, test <-> implementation, call site <-> definition
+        "code2text",  # implementation -> its documentation (CodeSearchNet code -> docstring)
         "navigation",  # identifier / symbol query -> definition
         "general",  # general-domain text pairs kept to preserve broad usefulness
     }

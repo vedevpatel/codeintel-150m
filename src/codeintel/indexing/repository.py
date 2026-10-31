@@ -32,7 +32,7 @@ SKIP_DIRS = frozenset(
         ".git", ".hg", ".svn", "node_modules", "bower_components", "__pycache__", ".mypy_cache",
         ".pytest_cache", ".ruff_cache", ".tox", ".nox", ".venv", "venv", "env", ".eggs", "site-packages",
         "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".cache", "vendor", "_vendor",
-        "vendored", "third_party", "thirdparty",
+        "vendored", "third_party", "thirdparty", "typeshed",
     }
 )
 
@@ -97,13 +97,8 @@ def _skipped_dir(rel: str) -> bool:
     return any(p in SKIP_DIRS for p in rel.split("/")[:-1])
 
 
-def iter_source_files_at_commit(
-    repo: str | Path,
-    commit: str,
-    languages: Iterable[str] = DEFAULT_LANGUAGES,
-    include_generated: bool = False,
-) -> Iterator[SourceFile]:
-    """Yield source files as they were at `commit`, read from git objects without touching the worktree."""
+def list_source_blobs(repo: str | Path, commit: str, languages: Iterable[str] = DEFAULT_LANGUAGES) -> list[tuple[str, str]]:
+    """(path, blob id) of indexable files at `commit`, sorted by path."""
     languages = frozenset(languages)
     listing = subprocess.run(
         ["git", "-C", str(repo), "ls-tree", "-r", "-z", "--long", commit], capture_output=True, check=True
@@ -120,13 +115,17 @@ def iter_source_files_at_commit(
         if _skipped_dir(path) or detect_language(path) not in languages:
             continue
         wanted.append((path, obj))
-    wanted.sort()
+    return sorted(wanted)
+
+
+def read_source_blobs(repo: str | Path, blobs: Iterable[tuple[str, str]]) -> Iterator[tuple[str, str, SourceFile | None]]:
+    """(path, blob id, SourceFile or None if binary/empty/generated) for each blob, via one `git cat-file`."""
     proc = subprocess.Popen(
         ["git", "-C", str(repo), "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
     )
     assert proc.stdin is not None and proc.stdout is not None
     try:
-        for path, obj in wanted:
+        for path, obj in blobs:
             proc.stdin.write(f"{obj}\n".encode())
             proc.stdin.flush()
             header = proc.stdout.readline().split()
@@ -134,21 +133,26 @@ def iter_source_files_at_commit(
             data = proc.stdout.read(size)
             proc.stdout.read(1)  # trailing newline
             text = _decode_source(data)
-            if text is None or not text.strip():
-                continue
-            if not include_generated and is_probably_generated(text):
-                continue
-            yield SourceFile(path=path, language=detect_language(path) or "", text=text)
+            if text is None or not text.strip() or is_probably_generated(text):
+                yield path, obj, None
+            else:
+                yield path, obj, SourceFile(path=path, language=detect_language(path) or "", text=text)
     finally:
         proc.stdin.close()
         proc.wait()
 
 
-def iter_source_files(
-    root: str | Path,
-    languages: Iterable[str] = DEFAULT_LANGUAGES,
-    include_generated: bool = False,
+def iter_source_files_at_commit(
+    repo: str | Path, commit: str, languages: Iterable[str] = DEFAULT_LANGUAGES
 ) -> Iterator[SourceFile]:
+    """Yield source files as they were at `commit`, read from git objects without touching the worktree."""
+    blobs = list_source_blobs(repo, commit, languages)
+    for _, _, source in read_source_blobs(repo, blobs):
+        if source is not None:
+            yield source
+
+
+def iter_source_files(root: str | Path, languages: Iterable[str] = DEFAULT_LANGUAGES) -> Iterator[SourceFile]:
     """Yield source files under `root` in a deterministic order."""
     root = Path(root).resolve()
     languages = frozenset(languages)
@@ -162,8 +166,6 @@ def iter_source_files(
         if language not in languages:
             continue
         text = read_source(root / rel)
-        if text is None or not text.strip():
-            continue
-        if not include_generated and is_probably_generated(text):
+        if text is None or not text.strip() or is_probably_generated(text):
             continue
         yield SourceFile(path=rel, language=language, text=text)

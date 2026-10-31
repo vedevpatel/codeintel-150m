@@ -146,7 +146,9 @@ class OnnxEmbedder(EmbeddingModel):
         raw = json.loads((directory / ADAPTER_SPEC_FILE).read_text())
         self.query_prefix = raw.get("query_prefix", self.spec.query_prefix) if cfg.query_prefix is None else cfg.query_prefix
         self.document_prefix = raw.get("document_prefix", self.spec.document_prefix) if cfg.document_prefix is None else cfg.document_prefix
-        self.model_path = directory / ("model_int8.onnx" if cfg.dtype == "int8" else "model.onnx")
+        filename = "model_int8.onnx" if cfg.dtype == "int8" else "model.onnx"
+        # An export directory keeps the model files at the top level; a Hugging Face release keeps them in onnx/.
+        self.model_path = directory / filename if (directory / filename).exists() else directory / "onnx" / filename
         self.session = ort.InferenceSession(str(self.model_path), providers=["CPUExecutionProvider"])
         self.tokenizer = AutoTokenizer.from_pretrained(str(directory))
         self.max_length = cfg.max_length or self.spec.recommended_max_length

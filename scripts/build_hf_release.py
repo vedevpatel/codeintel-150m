@@ -39,6 +39,8 @@ def main() -> int:
     config.pop("torch_dtype", None)
     config["dtype"] = "float32"
     (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    # The adapter spec lets codeintel load the release directly (`codeintel mcp`, adapter: hf / onnx).
+    (out / "codeintel_adapter.json").write_text(json.dumps({k: v for k, v in spec.items() if k != "source"}, indent=2) + "\n")
     for name in ("special_tokens_map.json",):
         if (src / name).exists():
             shutil.copy(src / name, out / name)

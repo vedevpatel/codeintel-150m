@@ -1,0 +1,11 @@
+# nomic-ai/CodeRankEmbed on the native NomicBERT implementation (src/codeintel/models/nomic_bert.py): same weights
+# and pinned revision as coderankembed.yaml, but no repository code is executed (trust_remote_code: false).
+name: coderankembed-native
+adapter: coderank-native
+repo_id: nomic-ai/CodeRankEmbed
+revision: 3c4b60807d71f79b43f3c4363786d9493691f8b1
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

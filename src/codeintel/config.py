@@ -33,7 +33,7 @@ def is_commit_sha(revision: str | None) -> bool:
 @dataclass
 class ModelConfig:
     name: str
-    adapter: str  # "coderank" | "modernbert" | "hf" (generic, for fine-tuned checkpoints)
+    adapter: str  # see codeintel.models.base.load_model, e.g. "coderank", "granite-r2", "hf" (fine-tuned checkpoint), "onnx"
     repo_id: str
     # Full 40-character commit SHA on the Hub. Branch names and tags are mutable and rejected.
     revision: str | None = None
@@ -89,16 +89,34 @@ class EvaluationConfig:
     bootstrap_samples: int = 1000
     seed: int = 13
     cache_dir: str = "artifacts/cache"
+    # Optional localization preprocessing; the defaults leave both off.
+    chunk_context: str = "basic"  # "basic" | "rich" (enclosing-class and module context in each chunk header)
+    query_cleaning: bool = False  # clean issue text (template/env/log noise) and cap its length
+    query_max_chars: int = 1200
+
+    @property
+    def variant(self) -> str:
+        """"" with the default preprocessing; otherwise a short label that is part of every checkpoint key."""
+        parts = []
+        if self.chunk_context != "basic":
+            parts.append(f"chunks={self.chunk_context}")
+        if self.query_cleaning:
+            parts.append(f"clean={self.query_max_chars}")
+        return ";".join(parts)
 
 
 @dataclass
 class TrainingConfig:
     model: str  # path to model YAML (the base checkpoint)
-    train_files: list[str]
+    train_files: list[str] = field(default_factory=list)
+    # Alternative to train_files: a file written by codeintel.training.pack.pack_groups (grouped, deduplicated, truncated).
+    packed_groups: str | None = None
     output_dir: str = "artifacts/checkpoints/run"
     dev_task: TaskConfig | None = None
-    # Sampling weight per training source, e.g. {"commit": 2.0, "docstring": 1.0}. Missing -> 1.0.
-    source_weights: dict[str, float] = field(default_factory=dict)
+    # Probability that a batch is drawn from each source, e.g. {"issues": 0.2, "docstring": 0.08} (batches are
+    # source-homogeneous; shares are normalised). Unlisted sources are unused.
+    source_shares: dict[str, float] = field(default_factory=dict)
+    max_positives: int = 3
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
     warmup_ratio: float = 0.05
@@ -114,6 +132,9 @@ class TrainingConfig:
     matryoshka_dims: list[int] = field(default_factory=list)
     # Weight of the KL term that keeps the student's similarity distribution close to the frozen base model.
     distill_weight: float = 0.0
+    # Precomputed teacher embeddings (scripts/teacher_cache.py) used for distillation instead of a live forward
+    # pass of the frozen base; also how a different, stronger model can act as the teacher.
+    teacher_cache: str | None = None
     distill_temperature: float = 0.05
     max_query_length: int = 256
     max_document_length: int = 512

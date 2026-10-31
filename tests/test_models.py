@@ -144,3 +144,70 @@ def test_local_fingerprint_tracks_weights(tiny_bert_dir, tmp_path):
     weights[name] = weights[name] + 1
     save_file(weights, copy / "model.safetensors")
     assert load_model(cfg).fingerprint != before
+
+
+def test_auto_dtype_uses_fp16_on_cards_without_native_bf16(monkeypatch):
+    from codeintel.models.base import resolve_dtype
+
+    cuda = torch.device("cuda")
+    # A T4 reports bf16 as "supported" only through emulation.
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda including_emulation=True: including_emulation)
+    assert resolve_dtype("auto", cuda) == torch.float16
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda including_emulation=True: True)
+    assert resolve_dtype("auto", cuda) == torch.bfloat16
+    assert resolve_dtype("auto", torch.device("cpu")) == torch.float32
+
+
+def test_interpolation_endpoints_and_midpoint(tiny_model_cfg, tmp_path):
+    from dataclasses import replace
+
+    from codeintel.models.interpolate import blend_state_dicts, interpolate_checkpoint
+
+    base = load_model(tiny_model_cfg)
+    tuned_dir = tmp_path / "tuned"
+    tuned = load_model(tiny_model_cfg)
+    with torch.no_grad():
+        for p in tuned.model.parameters():
+            p.add_(0.05 * torch.randn_like(p))
+    tuned.save(tuned_dir)
+    tuned_cfg = replace(tiny_model_cfg, name="tuned", local_dir=str(tuned_dir))
+    texts = ["def parse(file): return json", "class retry: pass"]
+    ref_base, ref_tuned = base.encode_documents(texts), load_model(tuned_cfg).encode_documents(texts)
+    assert np.abs(ref_base - ref_tuned).max() > 1e-3
+    for alpha, expected in ((0.0, ref_base), (1.0, ref_tuned)):
+        out = interpolate_checkpoint(tiny_model_cfg, tuned_cfg, alpha, tmp_path / f"a{alpha}", half=False)
+        reloaded = load_model(replace(tiny_model_cfg, name=f"a{alpha}", local_dir=str(out)))
+        np.testing.assert_allclose(reloaded.encode_documents(texts), expected, atol=1e-5)
+    sd_b, sd_t = base.model.state_dict(), load_model(tuned_cfg).model.state_dict()
+    mid = blend_state_dicts(sd_b, sd_t, 0.5)
+    key = next(k for k, v in sd_b.items() if v.is_floating_point())
+    torch.testing.assert_close(mid[key], 0.5 * sd_b[key].float() + 0.5 * sd_t[key].float())
+    with pytest.raises(ValueError):
+        blend_state_dicts(sd_b, {k: v for k, v in list(sd_t.items())[1:]}, 0.5)
+
+
+@pytest.mark.network
+def test_native_nomic_bert_matches_reviewed_remote_code():
+    """The native CodeRankEmbed path (no remote code) reproduces the reviewed reference implementation."""
+    ref = load_model(load_model_config(ROOT / "configs/models/coderankembed.yaml"))
+    native = load_model(load_model_config(ROOT / "configs/models/coderankembed-native.yaml"))
+    code = [(ROOT / "src/codeintel/evaluation/runner.py").read_text()[:20000], "def f():\n    return 1"]
+    queries = ["retry a failed request", "parse a json file"]
+    for a, b in ((ref.encode_documents(code), native.encode_documents(code)), (ref.encode_queries(queries), native.encode_queries(queries))):
+        assert np.min(np.sum(a * b, axis=1)) > 0.9999
+
+
+def test_native_nomic_bert_rejects_unsupported_configs():
+    from codeintel.models.nomic_bert import NomicBertSpec
+
+    base = {"activation_function": "swiglu", "prenorm": False, "qkv_proj_bias": False, "mlp_fc1_bias": False,
+            "mlp_fc2_bias": False, "rotary_emb_fraction": 1.0, "rotary_emb_interleaved": False, "causal": False,
+            "parallel_block": False, "use_rms_norm": False, "vocab_size": 30528, "pad_vocab_size_multiple": 64,
+            "n_embd": 768, "n_layer": 12, "n_head": 12, "n_inner": 3072, "type_vocab_size": 2,
+            "layer_norm_epsilon": 1e-12, "rotary_emb_base": 1000}
+    assert NomicBertSpec.from_config(base).vocab_size == 30528
+    for key, value in (("prenorm", True), ("activation_function", "gelu"), ("rotary_emb_interleaved", True)):
+        with pytest.raises(ValueError):
+            NomicBertSpec.from_config({**base, key: value})
+    with pytest.raises(ValueError):
+        NomicBertSpec.from_config({**base, "rotary_scaling_factor": 2.0})

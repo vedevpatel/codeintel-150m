@@ -1,0 +1,10 @@
+# ibm-granite/granite-embedding-english-r2 -- 149M ModernBERT, Apache-2.0. CodeIntel's base model (src/codeintel/models/competitors.py).
+name: granite-r2
+adapter: granite-r2
+repo_id: ibm-granite/granite-embedding-english-r2
+revision: 47ea694b257b703fee9253d75c2b1f2985180498
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

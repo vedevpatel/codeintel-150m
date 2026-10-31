@@ -12,6 +12,7 @@ import ast
 import importlib
 import logging
 import re
+import warnings
 from dataclasses import dataclass, field, replace
 from functools import cache
 
@@ -54,7 +55,9 @@ def _python_doc_span(node: ast.AST) -> tuple[int, int] | None:
 
 def parse_python(source: SourceFile) -> list[Symbol]:
     try:
-        tree = ast.parse(source.text)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)  # e.g. invalid escapes in third-party code
+            tree = ast.parse(source.text)
     except (SyntaxError, ValueError):
         return []
     lines = split_lines(source.text)
@@ -83,6 +86,21 @@ def parse_python(source: SourceFile) -> list[Symbol]:
                 # Nested functions stay inside their parent's chunk; class bodies are expanded.
                 if is_class:
                     visit(node.body, scope + [node.name], in_class=True)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and not scope and (node.end_lineno or node.lineno) > node.lineno:
+                # Multi-line module-level values (tables, registries, configs) are definitions worth locating.
+                target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+                name = ast.unparse(target) if isinstance(target, (ast.Name, ast.Attribute)) else None
+                if name:
+                    symbols.append(
+                        Symbol(
+                            name=name,
+                            qualified_name=name,
+                            kind="variable",
+                            start_line=node.lineno,
+                            end_line=node.end_lineno or node.lineno,
+                            signature=_clean_signature(lines[node.lineno - 1]),
+                        )
+                    )
             elif isinstance(node, (ast.If, ast.Try)) and not scope:
                 # Definitions guarded by `if TYPE_CHECKING:` / `try: import ... except:` at module level.
                 for child_body in (node.body, getattr(node, "orelse", []), getattr(node, "finalbody", [])):
@@ -320,6 +338,14 @@ class _TreeSitterExtractor:
             elif target.type in self.spec.function_values and target is not child:
                 # `export default function () {}` / `export default () => ...`
                 self.emit(child, target, "default", "method" if in_container else "function", scope)
+            elif (
+                child.type == "export_statement"
+                and not in_container
+                and (value := child.child_by_field_name("value")) is not None
+                and child.end_point[0] > child.start_point[0]
+            ):
+                # `export default { ... }` / `export default defineConfig({ ... })`
+                self.emit(child, value, "default", "variable", scope)
             elif target.type in self.spec.lexical:
                 declarators = [d for d in target.named_children if d.type in self.spec.declarators]
                 for decl in declarators:
@@ -333,6 +359,9 @@ class _TreeSitterExtractor:
                         self.emit(child, sig_node, self.text(name_node), kind, scope, body_owner=value)
                     elif value.type in ("class", "class_expression"):
                         self.handle_definition(child, value, scope, in_container, name=self.text(name_node))
+                    elif not in_container and len(declarators) == 1 and child.end_point[0] > child.start_point[0]:
+                        # Multi-line top-level values: `export const handler = createHandler(...)`, lookup tables.
+                        self.emit(child, target, self.text(name_node), "variable", scope)
             elif target.type in self.spec.fields and in_container:
                 value = target.child_by_field_name("value")
                 name_node = target.child_by_field_name("name") or target.child_by_field_name("property")

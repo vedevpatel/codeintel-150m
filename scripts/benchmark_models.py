@@ -1,6 +1,6 @@
 """Benchmark candidate checkpoints: retrieval quality (via an evaluation config) and encode throughput.
 
-  uv run python scripts/benchmark_models.py --config configs/evaluation/baseline.yaml --out artifacts/benchmarks/baseline
+  uv run python scripts/benchmark_models.py --config configs/evaluation/retrieval.yaml --out artifacts/benchmarks/baseline
   uv run python scripts/benchmark_models.py --skip-eval --throughput --devices cpu mps
   uv run python scripts/benchmark_models.py --config configs/evaluation/int8.yaml \
       --extra-models onnx:artifacts/onnx/gte-modernbert:int8 onnx:artifacts/onnx/gte-modernbert:float32
@@ -98,7 +98,7 @@ def render_throughput(rows: list[dict]) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", default=str(ROOT / "configs/evaluation/baseline.yaml"))
+    parser.add_argument("--config", default=str(ROOT / "configs/evaluation/retrieval.yaml"))
     parser.add_argument("--out", default=str(ROOT / "artifacts/benchmarks/latest"))
     parser.add_argument("--extra-models", nargs="*", default=[])
     parser.add_argument("--skip-eval", action="store_true")

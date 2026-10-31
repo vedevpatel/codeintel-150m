@@ -1,0 +1,10 @@
+# nomic-ai/modernbert-embed-base -- 149M ModernBERT, Apache-2.0. Comparison model (src/codeintel/models/competitors.py).
+name: modernbert-embed
+adapter: modernbert-embed
+repo_id: nomic-ai/modernbert-embed-base
+revision: d556a88e332558790b210f7bdbe87da2fa94a8d8
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

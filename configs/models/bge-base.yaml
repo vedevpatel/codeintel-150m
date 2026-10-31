@@ -1,0 +1,10 @@
+# BAAI/bge-base-en-v1.5 -- 110M BERT, MIT. Comparison model (src/codeintel/models/competitors.py).
+name: bge-base
+adapter: bge-base
+repo_id: BAAI/bge-base-en-v1.5
+revision: a5beb1e3e68b9ab74eb54cfd186867f64f240e1a
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 512
+batch_size: 32

@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("search", help="query an index")
     p.add_argument("index")
     p.add_argument("query")
-    p.add_argument("--model")
+    p.add_argument("--model", help="model YAML the index was built with (dense and hybrid modes)")
     p.add_argument("--mode", choices=["dense", "bm25", "hybrid"], default="hybrid")
     p.add_argument("--level", choices=["chunk", "file", "symbol"], default="chunk")
     p.add_argument("-k", type=int, default=10)

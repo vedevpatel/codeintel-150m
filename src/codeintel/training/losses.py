@@ -1,4 +1,10 @@
-"""Contrastive objectives for bi-encoder training."""
+"""Contrastive objectives for bi-encoder training.
+
+A fix usually edits several functions, so a query has a *set* of positives. The loss is the average, over a
+query's positives, of an InfoNCE term whose denominator holds that positive and every true negative (in-batch
+positives of other queries and mined hard negatives), but not the query's other positives. Documents whose text
+duplicates one of a query's positives without being listed for it are masked out of its denominator.
+"""
 
 from __future__ import annotations
 
@@ -8,32 +14,59 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
+NEG = -1e9  # finite "minus infinity": keeps gradients defined for rows where everything is masked
 
-def duplicate_mask(row_keys: Sequence[str], col_keys: Sequence[str], device: torch.device) -> torch.Tensor:
-    """(rows, cols) bool mask, True where col j has the same normalised text as row i's target but j != i.
 
-    Those columns are identical to the label, so treating them as negatives would penalise the right answer.
-    """
-    mask = torch.zeros(len(row_keys), len(col_keys), dtype=torch.bool)
-    positions: dict[str, list[int]] = {}
-    for j, k in enumerate(col_keys):
-        positions.setdefault(k, []).append(j)
-    for i, k in enumerate(row_keys):
-        for j in positions.get(k, ()):
-            if j != i:
-                mask[i, j] = True
+def positive_mask(positive_index: Sequence[Sequence[int]], n_docs: int, device: torch.device) -> torch.Tensor:
+    """(queries, docs) bool matrix, True where the document is a positive of the query."""
+    mask = torch.zeros(len(positive_index), n_docs, dtype=torch.bool)
+    for i, cols in enumerate(positive_index):
+        mask[i, list(cols)] = True
     return mask.to(device)
 
 
-def info_nce(
-    q: torch.Tensor, d: torch.Tensor, temperature: float, mask: torch.Tensor | None = None
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """InfoNCE with row i's label at column i. `d` may carry extra (hard-negative) columns. Returns (loss, logits)."""
+def duplicate_doc_mask(positive_index: Sequence[Sequence[int]], document_keys: Sequence[str], device: torch.device) -> torch.Tensor:
+    """True where a document has the same normalised text as one of the query's positives but is not listed
+    as a positive of that query: treating it as a negative would penalise the right answer."""
+    keys_at: dict[str, list[int]] = {}
+    for j, k in enumerate(document_keys):
+        keys_at.setdefault(k, []).append(j)
+    mask = torch.zeros(len(positive_index), len(document_keys), dtype=torch.bool)
+    for i, cols in enumerate(positive_index):
+        own = set(cols)
+        for c in cols:
+            for j in keys_at[document_keys[c]]:
+                if j not in own:
+                    mask[i, j] = True
+    return mask.to(device)
+
+
+def duplicate_query_mask(query_keys: Sequence[str], device: torch.device) -> torch.Tensor:
+    """(queries, queries) True where two different queries have identical normalised text."""
+    keys = list(query_keys)
+    mask = torch.tensor([[a == b and i != j for j, b in enumerate(keys)] for i, a in enumerate(keys)], dtype=torch.bool)
+    return mask.to(device)
+
+
+def multi_positive_nce(
+    q: torch.Tensor, d: torch.Tensor, pos: torch.Tensor, dup: torch.Tensor, temperature: float
+) -> torch.Tensor:
+    """Mean over queries of the mean over their positives of -log(exp(s_p) / (exp(s_p) + sum_neg exp(s_n)))."""
     logits = q @ d.T / temperature
-    if mask is not None:
-        logits = logits.masked_fill(mask, torch.finfo(logits.dtype).min)
-    labels = torch.arange(q.size(0), device=q.device)
-    return F.cross_entropy(logits, labels), logits
+    negatives = logits.masked_fill(pos | dup, NEG)
+    neg_lse = torch.logsumexp(negatives, dim=1, keepdim=True)  # (B, 1)
+    per_positive = F.softplus(neg_lse - logits)  # == -log(exp(l) / (exp(l) + exp(neg_lse)))
+    per_query = (per_positive * pos).sum(1) / pos.sum(1).clamp(min=1)
+    return per_query[pos.any(1)].mean()
+
+
+def reverse_nce(q: torch.Tensor, d: torch.Tensor, pos: torch.Tensor, qdup: torch.Tensor, temperature: float) -> torch.Tensor:
+    """Document -> query direction for every positive document, labelled with its (first) owning query."""
+    owned = pos.any(0)
+    owner = pos.float().argmax(0)[owned]
+    logits = d[owned] @ q.T / temperature
+    logits = logits.masked_fill(qdup[owner], NEG)
+    return F.cross_entropy(logits, owner)
 
 
 @dataclass
@@ -44,26 +77,17 @@ class ContrastiveLoss:
     distill_weight: float = 0.0
     distill_temperature: float = 0.05
 
-    def _single(
-        self,
-        q: torch.Tensor,
-        d: torch.Tensor,
-        fn_mask: torch.Tensor,
-        q_mask: torch.Tensor,
-        teacher_sims: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, dict[str, float]]:
-        loss, _ = info_nce(q, d, self.temperature, fn_mask)
+    def _single(self, q, d, pos, dup, qdup, teacher_sims) -> tuple[torch.Tensor, dict[str, float]]:
+        loss = multi_positive_nce(q, d, pos, dup, self.temperature)
         logs = {"nce": float(loss.detach())}
         if self.symmetric:
-            b = q.size(0)
-            rev, _ = info_nce(d[:b], q, self.temperature, q_mask)
+            rev = reverse_nce(q, d, pos, qdup, self.temperature)
             logs["nce_rev"] = float(rev.detach())
             loss = (loss + rev) / 2
         if teacher_sims is not None and self.distill_weight > 0:
             # Keep the student's ranking distribution close to the frozen base model's (anti-forgetting).
-            # Masked columns get a large finite negative so that 0 * log-prob stays finite.
-            student = (q @ d.T / self.distill_temperature).masked_fill(fn_mask, -1e4).log_softmax(-1)
-            teacher = (teacher_sims / self.distill_temperature).masked_fill(fn_mask, -1e4).softmax(-1)
+            student = (q @ d.T / self.distill_temperature).masked_fill(dup, NEG).log_softmax(-1)
+            teacher = (teacher_sims / self.distill_temperature).masked_fill(dup, NEG).softmax(-1)
             kl = F.kl_div(student, teacher, reduction="batchmean")
             logs["distill"] = float(kl.detach())
             loss = loss + self.distill_weight * kl
@@ -73,24 +97,23 @@ class ContrastiveLoss:
         self,
         q: torch.Tensor,
         d: torch.Tensor,
-        positive_keys: Sequence[str],
+        positive_index: Sequence[Sequence[int]],
         query_keys: Sequence[str],
         document_keys: Sequence[str],
         teacher_q: torch.Tensor | None = None,
         teacher_d: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
         q, d = q.float(), d.float()
-        fn_mask = duplicate_mask(positive_keys, document_keys, q.device)
-        q_mask = duplicate_mask(query_keys, query_keys, q.device)
+        pos = positive_mask(positive_index, d.size(0), q.device)
+        dup = duplicate_doc_mask(positive_index, document_keys, q.device)
+        qdup = duplicate_query_mask(query_keys, q.device)
         teacher_sims = None
         if teacher_q is not None and teacher_d is not None:
             teacher_sims = teacher_q.float() @ teacher_d.float().T
-        loss, logs = self._single(q, d, fn_mask, q_mask, teacher_sims)
+        loss, logs = self._single(q, d, pos, dup, qdup, teacher_sims)
         dims = [m for m in self.matryoshka_dims if m < q.size(1)]
         for dim in dims:
-            qd = F.normalize(q[:, :dim], dim=-1)
-            dd = F.normalize(d[:, :dim], dim=-1)
-            extra, _ = self._single(qd, dd, fn_mask, q_mask, None)
+            extra, _ = self._single(F.normalize(q[:, :dim], dim=-1), F.normalize(d[:, :dim], dim=-1), pos, dup, qdup, None)
             logs[f"nce@{dim}"] = float(extra.detach())
             loss = loss + extra
         if dims:

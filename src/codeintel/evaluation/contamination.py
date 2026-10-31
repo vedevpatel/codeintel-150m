@@ -5,8 +5,8 @@ Three levels of overlap are checked:
   * near-dup:   MinHash-LSH candidates over token 5-gram shingles, confirmed by exact Jaccard;
   * repository: an evaluation repository also appearing in the training data.
 
-Public benchmarks may additionally overlap with the *candidates'* own (pre-)training corpora, which cannot
-be checked locally; `KNOWN_EXPOSURE` records what is known so reports can flag affected tasks.
+Public benchmarks may additionally overlap with the evaluated models' own (pre-)training corpora, which
+cannot be checked locally; `KNOWN_EXPOSURE` records what is known so reports can flag affected tasks.
 """
 
 from __future__ import annotations
@@ -23,22 +23,26 @@ _LINE_COMMENT = re.compile(r"(?m)(^|\s)(#|//).*$")
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+|[^\sA-Za-z0-9_]")
 
-# Benchmarks whose source data predates the candidates and is widely redistributed. Neither candidate's
-# full training mixture is published in a form we can deduplicate against, so these are flagged rather
-# than measured.
+# Benchmarks whose source data is public and widely redistributed. The evaluated models' training mixtures
+# are not published in a form we can deduplicate against, so these are flagged rather than measured.
 KNOWN_EXPOSURE: dict[str, str] = {
     "codesearchnet": (
         "CodeSearchNet (2019 GitHub snapshot) and its derivatives (CoIR CSN, CosQA, AdvTest) are public; "
         "CodeRankEmbed reports CSN results and is trained on CoRNStack (built from The Stack v2), and "
-        "gte-modernbert's retrieval mixture is not fully published. Treat as possibly contaminated for both."
+        "gte-modernbert's retrieval mixture is not fully published. Treat as possibly contaminated."
     ),
     "swe-bench": (
-        "SWE-bench issues and repositories predate both candidates' releases and are public; repository code "
-        "is almost certainly in pre-training corpora. Treat absolute numbers with caution."
+        "SWE-bench issues and repositories are public; repository code is almost certainly in pre-training "
+        "corpora. Treat absolute numbers with caution."
+    ),
+    "temporal-issues": (
+        "Issues opened after CodeRankEmbed (2024-11-03) and gte-modernbert-base (2025-01-20) were published "
+        "on the Hub and closed by a merged PR. Issue text is unseen by those models; pre-change code may "
+        "have been seen."
     ),
     "temporal-commits": (
-        "Commits authored after both candidates were published on the Hub (CodeRankEmbed: 2024-11-03, "
-        "gte-modernbert-base: 2025-01-20). Commit messages are unseen; pre-change code may have been seen."
+        "Commits authored after CodeRankEmbed (2024-11-03) and gte-modernbert-base (2025-01-20) were published "
+        "on the Hub. Commit messages are unseen by those models; pre-change code may have been seen."
     ),
 }
 
@@ -112,20 +116,6 @@ class OverlapReport:
     near_duplicate: int = 0
     repos_overlapping: list[str] = field(default_factory=list)
     examples: list[tuple[str, str, float]] = field(default_factory=list)
-
-    @property
-    def rate(self) -> float:
-        return (self.exact + self.near_duplicate) / self.num_eval if self.num_eval else 0.0
-
-    def to_dict(self) -> dict:
-        return {
-            "num_eval": self.num_eval,
-            "exact": self.exact,
-            "near_duplicate": self.near_duplicate,
-            "rate": self.rate,
-            "repos_overlapping": self.repos_overlapping,
-            "examples": self.examples[:20],
-        }
 
 
 def overlap_report(

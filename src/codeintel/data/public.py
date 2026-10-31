@@ -17,6 +17,9 @@ from codeintel.data.schemas import CorpusDoc, Qrel, QueryRecord, write_jsonl
 COIR_REVISIONS = {
     "CoIR-Retrieval/CodeSearchNet": "25e0292562b7bee26dd9b2d83a03981795862c77",
     "CoIR-Retrieval/cosqa": "0846fa3b963a21bead36e9fab61451fc83b777a6",
+    "CoIR-Retrieval/CodeSearchNet-ccr": "0466f2b369890e01516457522a6491c1770776bf",
+    "CoIR-Retrieval/stackoverflow-qa": "67c8d0ffd93a57d311218b4cfaf323133e6579aa",
+    "CoIR-Retrieval/apps": "ad8755dfa53f1de865e165d507fa0523502b5682",
 }
 
 
@@ -122,6 +125,29 @@ def import_cosqa(out_dir: str | Path, split: str = "test") -> dict[str, int]:
         for r in _read_parquet(repo, "corpus/corpus-00000-of-00001.parquet")
     ]
     judgements = [Qrel(r["query-id"], r["corpus-id"], float(r["score"])) for r in qrels]
+    corpus, judgements, merged = collapse_duplicates(corpus, judgements)
+    out_dir = Path(out_dir)
+    return {
+        "merged_duplicates": merged,
+        "corpus": write_jsonl(out_dir / "corpus.jsonl", corpus),
+        "queries": write_jsonl(out_dir / "queries.jsonl", queries),
+        "qrels": write_jsonl(out_dir / "qrels.jsonl", judgements),
+    }
+
+
+def import_coir_native(repo: str, out_dir: str | Path, language: str | None = None, split: str = "test") -> dict[str, int]:
+    """A CoIR task exactly as published (same query/corpus direction and full corpus), for comparison with the
+    CoIR leaderboard. Per-language tasks (CodeSearchNet, CodeSearchNet-ccr) use `<language>-...` subsets; the others
+    keep their test qrels under `data/`."""
+    prefix = f"{language}-" if language else ""
+    qrels_file = f"{prefix}qrels/{split}-00000-of-00001.parquet" if language else f"data/{split}-00000-of-00001.parquet"
+    qrels = [r for r in _read_parquet(repo, qrels_file) if float(r.get("score", 1)) > 0]
+    qids = {r["query-id"] for r in qrels}
+    queries = [QueryRecord(id=r["_id"], text=r["text"], language=language or "")
+               for r in _read_parquet(repo, f"{prefix}queries/queries-00000-of-00001.parquet") if r["_id"] in qids]
+    corpus = [CorpusDoc(id=r["_id"], text=r["text"], language=language or "")
+              for r in _read_parquet(repo, f"{prefix}corpus/corpus-00000-of-00001.parquet")]
+    judgements = [Qrel(r["query-id"], r["corpus-id"], float(r.get("score", 1))) for r in qrels]
     corpus, judgements, merged = collapse_duplicates(corpus, judgements)
     out_dir = Path(out_dir)
     return {

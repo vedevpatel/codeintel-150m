@@ -1,0 +1,10 @@
+# Qwen/Qwen3-Embedding-0.6B -- 596M Qwen3, Apache-2.0. Comparison model (src/codeintel/models/competitors.py).
+name: qwen3-embed
+adapter: qwen3-embed
+repo_id: Qwen/Qwen3-Embedding-0.6B
+revision: 97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3
+trust_remote_code: false
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

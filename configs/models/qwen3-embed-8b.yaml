@@ -1,0 +1,11 @@
+# Qwen/Qwen3-Embedding-8B -- 7.6B Qwen3, Apache-2.0. Optional distillation teacher (not a
+# comparison model: 50x the target size). Same adapter as the 0.6B reference: last-token pooling, instruction prompt.
+name: qwen3-embed-8b
+adapter: qwen3-embed
+repo_id: Qwen/Qwen3-Embedding-8B
+revision: 1d8ad4ca9b3dd8059ad90a75d4983776a23d44af
+trust_remote_code: false
+device: auto
+dtype: bfloat16
+max_length: 512
+batch_size: 64

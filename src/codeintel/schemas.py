@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -66,10 +66,6 @@ class Chunk:
     text: str
     code: str
 
-    @property
-    def content_hash(self) -> str:
-        return sha256_text(self.text)
-
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -83,4 +79,3 @@ class SearchHit:
     key: str
     score: float
     rank: int
-    metadata: dict[str, Any] = field(default_factory=dict)

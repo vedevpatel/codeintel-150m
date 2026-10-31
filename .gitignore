@@ -16,4 +16,3 @@ build.log
 # Environment
 .env
 .DS_Store
-uv.lock

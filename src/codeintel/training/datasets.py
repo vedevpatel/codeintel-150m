@@ -26,92 +26,134 @@ def load_training_pairs(paths: Sequence[str]) -> list[TrainingPair]:
 
 
 @dataclass
+class TrainingGroup:
+    """One query with all of its positives (e.g. every function a fix edited) and its hard negatives."""
+
+    query: str
+    positives: list[str]
+    negatives: list[str]
+    source: str
+    repo: str = ""
+    language: str = ""
+
+
+def group_pairs(pairs: Sequence[TrainingPair], clean_sources: Sequence[str] = ("issues",)) -> list[TrainingGroup]:
+    """Merge pairs that share (source, repo, query) into groups; negatives never include a group's own positives.
+
+    Queries from `clean_sources` (real issue text) go through the same cleaning as evaluation queries, so the
+    model is trained on what it is later asked.
+    """
+    from codeintel.retrieval.query import clean_issue_query
+
+    merged: dict[tuple[str, str, str], TrainingGroup] = {}
+    for p in pairs:
+        g = merged.setdefault((p.source, p.repo, p.query), TrainingGroup(p.query, [], [], p.source, p.repo, p.language))
+        if p.positive not in g.positives:
+            g.positives.append(p.positive)
+        for n in p.negatives:
+            if n not in g.negatives:
+                g.negatives.append(n)
+    groups = list(merged.values())
+    for g in groups:
+        own = set(g.positives)
+        g.negatives = [n for n in g.negatives if n not in own]
+        if g.source in clean_sources:
+            g.query = clean_issue_query(g.query)
+    return groups
+
+
+@dataclass
 class Batch:
     queries: list[str]
-    documents: list[str]  # positives first (row-aligned with queries), then hard negatives
-    positive_keys: list[str]  # normalised-text key of each query's positive
+    documents: list[str]  # all positives (grouped by query, in query order), then hard negatives
+    positive_index: list[list[int]]  # per query: indices into `documents` of its positives
     query_keys: list[str]
     document_keys: list[str]
     source: str
 
 
-class SourceBatchSampler:
-    """Yield batches drawn from a single source at a time.
+class GroupBatchSampler:
+    """Infinite stream of batches of group indices, each batch drawn from a single source.
 
     Source-homogeneous batches keep in-batch negatives meaningful (an issue report is not contrasted against
-    docstring pairs from an unrelated task). Sources are sampled in proportion to weight * size. Records
-    whose query or positive duplicates one already in the batch are deferred, which removes the most common
-    in-batch false negatives.
+    docstring pairs from an unrelated task). A batch's source is drawn with probability proportional to
+    `shares[source]` (sources without a share get 0 and are never used), so the training mixture is specified
+    directly, e.g. 20% issue reports. Groups whose query, or any positive, duplicates one already in the batch
+    are deferred, which removes the most common in-batch false negatives.
     """
 
-    def __init__(
-        self,
-        records: Sequence[TrainingPair],
-        batch_size: int,
-        weights: Mapping[str, float] | None = None,
-        seed: int = 13,
-    ):
+    def __init__(self, groups: Sequence[TrainingGroup], batch_size: int, shares: Mapping[str, float], seed: int = 13):
         if batch_size < 2:
             raise ValueError("contrastive training needs batch_size >= 2")
-        self.records = records
-        self.batch_size = batch_size
-        self.rng = random.Random(seed)
+        self.groups, self.batch_size, self.rng = groups, batch_size, random.Random(seed)
         self.by_source: dict[str, list[int]] = defaultdict(list)
-        for i, r in enumerate(records):
-            self.by_source[r.source].append(i)
-        weights = weights or {}
-        self.weights = {s: weights.get(s, 1.0) * len(ix) for s, ix in self.by_source.items()}
-        self.query_keys = [exact_key(r.query) for r in records]
-        self.pos_keys = [exact_key(r.positive) for r in records]
+        for i, g in enumerate(groups):
+            self.by_source[g.source].append(i)
+        self.shares = {s: shares.get(s, 0.0) for s in self.by_source if shares.get(s, 0.0) > 0}
+        usable = [s for s in self.shares if len(self.by_source[s]) >= batch_size]
+        if not usable:
+            raise ValueError(f"no source with a positive share has {batch_size} groups; sources: "
+                             f"{ {s: len(v) for s, v in self.by_source.items()} }, shares: {dict(shares)}")
+        self.shares = {s: self.shares[s] for s in usable}
+        self.query_keys = [exact_key(g.query) for g in groups]
+        self.pos_keys = [{exact_key(p) for p in g.positives} for g in groups]
+        self._pools: dict[str, list[int]] = {s: [] for s in self.shares}
 
-    def __len__(self) -> int:
-        return sum(len(ix) // self.batch_size for ix in self.by_source.values())
+    def _refill(self, source: str) -> None:
+        self._pools[source] = self.rng.sample(self.by_source[source], len(self.by_source[source]))
+
+    def steps_per_epoch(self) -> int:
+        """Batches needed to pass over every group of the used sources once."""
+        return sum(len(self.by_source[s]) for s in self.shares) // self.batch_size
 
     def __iter__(self) -> Iterator[list[int]]:
-        pools = {s: self.rng.sample(ix, len(ix)) for s, ix in self.by_source.items()}
         while True:
-            live = [s for s, pool in pools.items() if len(pool) >= self.batch_size and self.weights[s] > 0]
-            if not live:
-                return
-            source = self.rng.choices(live, weights=[self.weights[s] for s in live])[0]
-            pool = pools[source]
-            before = len(pool)
-            batch, deferred, seen = [], [], set()
-            while pool and len(batch) < self.batch_size:
-                i = pool.pop()
-                keys = (self.query_keys[i], self.pos_keys[i])
-                if keys[0] in seen or keys[1] in seen:
+            source = self.rng.choices(list(self.shares), weights=list(self.shares.values()))[0]
+            batch, seen_q, seen_p, deferred, scans = [], set(), set(), [], 0
+            while len(batch) < self.batch_size:
+                if not self._pools[source]:
+                    self._refill(source)
+                    scans += 1
+                    if scans > 3:  # fewer distinct groups than the batch size after de-duplication
+                        break
+                i = self._pools[source].pop()
+                if self.query_keys[i] in seen_q or (self.pos_keys[i] & seen_p):
                     deferred.append(i)
                     continue
-                seen.update(keys)
+                seen_q.add(self.query_keys[i])
+                seen_p |= self.pos_keys[i]
                 batch.append(i)
-            pool.extend(deferred)
-            if len(batch) < self.batch_size:
-                # Only duplicates are left in this source; retire it and keep sampling the others.
-                pool.extend(batch)
-                assert len(pool) == before
-                pools[source] = []
-                continue
-            yield batch
+            self._pools[source].extend(deferred)
+            if len(batch) == self.batch_size:
+                yield batch
+            else:  # could not fill a duplicate-free batch from this source: drop it for the rest of the run
+                self.shares.pop(source)
+                if not self.shares:
+                    return
 
 
 def make_batch(
-    records: Sequence[TrainingPair], hard_negatives: int, rng: random.Random, query_prefix: str = "", document_prefix: str = ""
+    groups: Sequence[TrainingGroup], hard_negatives: int, rng: random.Random, query_prefix: str = "",
+    document_prefix: str = "", max_positives: int = 3,
 ) -> Batch:
-    queries = [query_prefix + r.query for r in records]
-    positives = [document_prefix + r.positive for r in records]
-    negatives: list[str] = []
-    for r in records:
-        if hard_negatives and r.negatives:
-            negatives.extend(document_prefix + n for n in rng.sample(r.negatives, min(hard_negatives, len(r.negatives))))
-    documents = positives + negatives
+    """Queries, then every query's positives (at most `max_positives`, sampled), then sampled hard negatives."""
+    queries = [query_prefix + g.query for g in groups]
+    documents: list[str] = []
+    positive_index: list[list[int]] = []
+    for g in groups:
+        chosen = g.positives if len(g.positives) <= max_positives else rng.sample(g.positives, max_positives)
+        positive_index.append(list(range(len(documents), len(documents) + len(chosen))))
+        documents.extend(document_prefix + p for p in chosen)
+    for g in groups:
+        if hard_negatives and g.negatives:
+            documents.extend(document_prefix + n for n in rng.sample(g.negatives, min(hard_negatives, len(g.negatives))))
     return Batch(
         queries=queries,
         documents=documents,
-        positive_keys=[exact_key(r.positive) for r in records],
-        query_keys=[exact_key(r.query) for r in records],
+        positive_index=positive_index,
+        query_keys=[exact_key(g.query) for g in groups],
         document_keys=[exact_key(d[len(document_prefix):]) for d in documents],
-        source=records[0].source if records else "",
+        source=groups[0].source if groups else "",
     )
 
 

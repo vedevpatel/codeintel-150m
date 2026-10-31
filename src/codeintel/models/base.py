@@ -1,6 +1,6 @@
 """Embedding model adapters.
 
-Each candidate checkpoint gets its own adapter that pins the inference behaviour recommended by its
+Each supported checkpoint gets its own adapter that pins the inference behaviour recommended by its
 model card (pooling, normalization, prompts). Shared mechanics -- secure snapshot resolution,
 remote-code hash verification, length-bucketed batching, device/dtype selection -- live here.
 """
@@ -41,7 +41,7 @@ PICKLE_SUFFIXES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle")
 class AdapterSpec:
     """Inference contract for a checkpoint, taken from its model card / sentence-transformers config."""
 
-    pooling: str  # cls | mean
+    pooling: str  # cls | mean | last
     normalize: bool
     query_prefix: str
     document_prefix: str
@@ -85,6 +85,15 @@ def resolve_device(requested: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def cuda_has_native_bf16(device: torch.device | None = None) -> bool:
+    """True only for hardware bf16 (Ampere or newer). `torch.cuda.is_bf16_supported()` also returns True on
+    older cards (e.g. T4) through emulation, which is slow and less precise than fp16 there."""
+    try:
+        return bool(torch.cuda.is_bf16_supported(including_emulation=False))
+    except TypeError:  # torch < 2.3 has no emulation argument and reports hardware support only
+        return bool(torch.cuda.is_bf16_supported())
+
+
 def resolve_dtype(requested: str, device: torch.device) -> torch.dtype:
     table = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
     if requested != "auto":
@@ -92,7 +101,7 @@ def resolve_dtype(requested: str, device: torch.device) -> torch.dtype:
             raise ConfigError(f"unknown dtype {requested!r}")
         return table[requested]
     if device.type == "cuda":
-        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        return torch.bfloat16 if cuda_has_native_bf16(device) else torch.float16
     # fp32 on CPU and MPS: half precision there is either slow (CPU) or numerically fragile (MPS).
     return torch.float32
 
@@ -199,6 +208,11 @@ def pool(hidden: torch.Tensor, attention_mask: torch.Tensor, mode: str) -> torch
     if mode == "mean":
         mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
         return (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+    if mode == "last":
+        # Last attended token, for either padding side (decoder-style embedders such as Qwen3-Embedding).
+        positions = torch.arange(attention_mask.size(1), device=attention_mask.device)
+        last = (attention_mask.long() * positions).argmax(1)
+        return hidden[torch.arange(hidden.size(0), device=hidden.device), last]
     raise ValueError(f"unknown pooling mode {mode!r}")
 
 
@@ -209,8 +223,6 @@ class TransformerEmbedder(EmbeddingModel):
     max_tokens_per_batch = 32768
 
     def __init__(self, cfg: ModelConfig, spec: AdapterSpec | None = None):
-        from transformers import AutoModel, AutoTokenizer
-
         if spec is not None:
             self.spec = spec
         if self.spec.requires_remote_code and not cfg.trust_remote_code:
@@ -231,14 +243,29 @@ class TransformerEmbedder(EmbeddingModel):
         self.query_prefix = self.spec.query_prefix if cfg.query_prefix is None else cfg.query_prefix
         self.document_prefix = self.spec.document_prefix if cfg.document_prefix is None else cfg.document_prefix
 
-        self.model = AutoModel.from_pretrained(str(self.snapshot), trust_remote_code=cfg.trust_remote_code)
-        # Passing the loaded config stops AutoTokenizer from re-resolving it (which would need remote code).
-        self.tokenizer = AutoTokenizer.from_pretrained(str(self.snapshot), config=self.model.config, trust_remote_code=False)
+        self.model = self.load_backbone(cfg)
+        self.tokenizer = self.load_tokenizer()
         check_weights_loaded(self.model, self.snapshot)
         self.post_load()
         self.model.to(device=self.device, dtype=self.dtype)
         self.model.eval()
         self._dim = int(getattr(self.model.config, "hidden_size", None) or self.model.config.n_embd)
+
+    def load_backbone(self, cfg: ModelConfig) -> torch.nn.Module:
+        import os
+
+        from transformers import AutoModel
+
+        kwargs = {}
+        if attn := os.environ.get("CODEINTEL_ATTN"):  # optional override, e.g. flash_attention_2 (ModernBERT unpads with it)
+            kwargs["attn_implementation"] = attn
+        return AutoModel.from_pretrained(str(self.snapshot), trust_remote_code=cfg.trust_remote_code, **kwargs)
+
+    def load_tokenizer(self):
+        from transformers import AutoTokenizer
+
+        # Passing the loaded config stops AutoTokenizer from re-resolving it (which would need remote code).
+        return AutoTokenizer.from_pretrained(str(self.snapshot), config=self.model.config, trust_remote_code=False)
 
     def post_load(self) -> None:
         """Compatibility fixes applied right after the weights are loaded (any adapter, incl. fine-tunes)."""
@@ -269,6 +296,20 @@ class TransformerEmbedder(EmbeddingModel):
         return self._dim
 
     _fingerprint: str | None = None
+
+    @property
+    def identity(self) -> str:
+        """The model and inference settings that define its rankings, without library versions or dtype.
+
+        Used to key portable evaluation checkpoints; `fingerprint` (stricter) keys embedding caches.
+        """
+        if self.cfg.local_dir:
+            weights = "".join(sha256_file(p) for p in sorted(self.snapshot.glob("*.safetensors")))
+            ident = "local:" + hashlib.sha256(weights.encode()).hexdigest()[:16]
+        else:
+            ident = f"{self.cfg.repo_id}@{self.cfg.revision}"
+        prefixes = hashlib.sha256(f"{self.query_prefix}\0{self.document_prefix}".encode()).hexdigest()[:12]
+        return f"{ident}|pool={self.spec.pooling}|norm={self.spec.normalize}|maxlen={self.max_length}|prefixes={prefixes}"
 
     @property
     def fingerprint(self) -> str:
@@ -370,12 +411,19 @@ def load_adapter_spec(directory: str | Path) -> AdapterSpec:
 
 def load_model(cfg: ModelConfig) -> EmbeddingModel:
     from codeintel.models.coderank import CodeRankEmbedAdapter
+    from codeintel.models.competitors import COMPETITOR_ADAPTERS
     from codeintel.models.modernbert import GteModernBertAdapter
 
     if cfg.adapter == "coderank":
         return CodeRankEmbedAdapter(cfg)
+    if cfg.adapter == "coderank-native":
+        from codeintel.models.coderank import NativeCodeRankEmbedAdapter
+
+        return NativeCodeRankEmbedAdapter(cfg)
     if cfg.adapter == "modernbert":
         return GteModernBertAdapter(cfg)
+    if cfg.adapter in COMPETITOR_ADAPTERS:
+        return COMPETITOR_ADAPTERS[cfg.adapter](cfg)
     if cfg.adapter == "onnx":
         from codeintel.models.export import OnnxEmbedder
 

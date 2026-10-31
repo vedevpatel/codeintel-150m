@@ -1,0 +1,16 @@
+# Quick check of the issue-localization pipeline on two repositories (pytest, hono).
+models:
+  - configs/models/granite-r2.yaml
+tasks:
+  - name: issue-smoke
+    type: localization
+    path: data/eval/issue-smoke/cases.jsonl
+    repos_dir: data/repos
+    contamination_note: temporal-issues
+output_dir: artifacts/eval/issue-smoke
+ks: [1, 5, 10, 20, 50]
+retrieval_modes: [dense, bm25, hybrid]
+primary_metric: ndcg@10
+bootstrap_samples: 1000
+seed: 13
+cache_dir: artifacts/cache

@@ -1,0 +1,20 @@
+# Issue -> code localization on the 35 held-out repositories (docs/evaluation.md). Build the cases with
+# `scripts/prepare_dataset.py issues` and clone the repositories with `scripts/prepare_dataset.py clone`. Replace the
+# model list to score other checkpoints; hybrid@2 is RRF fusion with dense weight 2.
+models:
+  - configs/models/granite-r2.yaml
+tasks:
+  - name: issue-localization
+    type: localization
+    path: data/eval/issue-localization/cases.jsonl
+    repos_dir: data/repos
+    contamination_note: temporal-issues
+output_dir: artifacts/eval/issue-localization
+ks: [1, 5, 10, 20, 50]
+retrieval_modes: [dense, bm25, "hybrid@2"]
+primary_metric: ndcg@10
+bootstrap_samples: 1000
+seed: 13
+cache_dir: artifacts/cache
+query_cleaning: true
+query_max_chars: 1200

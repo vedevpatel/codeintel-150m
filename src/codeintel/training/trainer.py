@@ -20,8 +20,8 @@ import numpy as np
 import torch
 
 from codeintel.config import TrainingConfig, load_model_config
-from codeintel.models.base import TransformerEmbedder, load_model
-from codeintel.training.datasets import Batch, SourceBatchSampler, load_training_pairs, make_batch
+from codeintel.models.base import TransformerEmbedder, cuda_has_native_bf16, load_model
+from codeintel.training.datasets import Batch, GroupBatchSampler, group_pairs, load_training_pairs, make_batch
 from codeintel.training.losses import ContrastiveLoss
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def set_seed(seed: int) -> None:
 
 def autocast_context(precision: str, device: torch.device):
     if precision in ("auto", "fp32"):
-        if precision == "auto" and device.type == "cuda" and torch.cuda.is_bf16_supported():
+        if precision == "auto" and device.type == "cuda" and cuda_has_native_bf16(device):
             return torch.autocast("cuda", dtype=torch.bfloat16)
         return contextlib.nullcontext()
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}[precision]
@@ -48,7 +48,7 @@ def enable_gradient_checkpointing(module: torch.nn.Module) -> None:
         return
     except (AttributeError, TypeError, ValueError):
         pass
-    # Remote-code models with the pre-v5 `_set_gradient_checkpointing(module, value)` hook.
+    # Remote-code models written against the pre-v5 transformers `_set_gradient_checkpointing(module, value)` hook.
     for sub in module.modules():
         if hasattr(sub, "gradient_checkpointing"):
             sub.gradient_checkpointing = True
@@ -100,12 +100,17 @@ class Trainer:
         self.out_dir = Path(cfg.output_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         base_cfg = load_model_config(cfg.model)
-        # Master weights stay in fp32; mixed precision comes from autocast.
+        # Weights stay in fp32; mixed precision comes from autocast.
         self.model_cfg = replace(base_cfg, dtype="float32")
         self.student: TransformerEmbedder = load_model(self.model_cfg)
         self.device = self.student.device
         self.teacher: TransformerEmbedder | None = None
-        if cfg.distill_weight > 0 or cfg.interpolate_alpha < 1.0:
+        self.teacher_cache = None
+        if cfg.teacher_cache and cfg.distill_weight > 0:
+            from codeintel.training.teacher import TeacherCache
+
+            self.teacher_cache = TeacherCache.load(cfg.teacher_cache)
+        if (cfg.distill_weight > 0 and self.teacher_cache is None) or cfg.interpolate_alpha < 1.0:
             self.teacher = load_model(self.model_cfg)
             self.teacher.model.requires_grad_(False)
         if cfg.gradient_checkpointing:
@@ -117,12 +122,16 @@ class Trainer:
             distill_weight=cfg.distill_weight,
             distill_temperature=cfg.distill_temperature,
         )
-        self.records = load_training_pairs(cfg.train_files)
-        self.sampler = SourceBatchSampler(self.records, cfg.batch_size, cfg.source_weights, cfg.seed)
-        steps_per_epoch = len(self.sampler)
-        if steps_per_epoch == 0:
-            raise ValueError("not enough training records for a single batch")
-        self.total_steps = cfg.max_steps or cfg.epochs * steps_per_epoch
+        if cfg.packed_groups:
+            from codeintel.training.pack import unpack_groups
+
+            self.groups = unpack_groups(cfg.packed_groups)
+        else:
+            self.groups = group_pairs(load_training_pairs(cfg.train_files))
+        self.sampler = GroupBatchSampler(self.groups, cfg.batch_size, cfg.source_shares, cfg.seed)
+        self.total_steps = cfg.max_steps or cfg.epochs * self.sampler.steps_per_epoch()
+        if self.total_steps == 0:
+            raise ValueError("not enough training groups for a single batch")
         self.optimizer = torch.optim.AdamW(param_groups(self.student.model, cfg.weight_decay), lr=cfg.learning_rate)
         self.scheduler = linear_warmup_decay(self.optimizer, int(cfg.warmup_ratio * self.total_steps), self.total_steps)
         self.rng = random.Random(cfg.seed)
@@ -140,7 +149,13 @@ class Trainer:
             return model.embed(tok["input_ids"], tok["attention_mask"])
 
     def _teacher_embeddings(self, batch: Batch):
-        if self.teacher is None or self.cfg.distill_weight <= 0:
+        if self.cfg.distill_weight <= 0:
+            return None, None
+        if self.teacher_cache is not None:
+            qp, dp = len(self.student.query_prefix), len(self.student.document_prefix)
+            return (self.teacher_cache.queries([q[qp:] for q in batch.queries], self.device),
+                    self.teacher_cache.documents([d[dp:] for d in batch.documents], self.device))
+        if self.teacher is None:
             return None, None
         with torch.no_grad():
             tq = self._embed(self.teacher, batch.queries, self.cfg.max_query_length)
@@ -151,7 +166,7 @@ class Trainer:
         q = self._embed(self.student, batch.queries, self.cfg.max_query_length)
         d = self._embed(self.student, batch.documents, self.cfg.max_document_length)
         tq, td = self._teacher_embeddings(batch)
-        loss, logs = self.loss_fn(q, d, batch.positive_keys, batch.query_keys, batch.document_keys, tq, td)
+        loss, logs = self.loss_fn(q, d, batch.positive_index, batch.query_keys, batch.document_keys, tq, td)
         loss.backward()
         return logs
 
@@ -172,7 +187,7 @@ class Trainer:
                 reps.append(torch.cat(outs).requires_grad_())
                 states.append(sts)
         tq, td = self._teacher_embeddings(batch)
-        loss, logs = self.loss_fn(reps[0], reps[1], batch.positive_keys, batch.query_keys, batch.document_keys, tq, td)
+        loss, logs = self.loss_fn(reps[0], reps[1], batch.positive_index, batch.query_keys, batch.document_keys, tq, td)
         loss.backward()
         for (parts, max_len), rep, sts in zip(groups, reps, states):
             grads = rep.grad.split([len(p) for p in parts])
@@ -184,9 +199,15 @@ class Trainer:
 
     # -- dev evaluation ----------------------------------------------------------------------------
     def evaluate(self) -> float | None:
+        """Dev score used to pick checkpoints: symbol-level nDCG@10 of the equal-weight hybrid on the dev cases.
+
+        Queries are cleaned exactly as in the benchmark. Dense and BM25 scores are logged alongside.
+        """
         task = self.cfg.dev_task
         if task is None:
             return None
+        from functools import partial
+
         from codeintel.evaluation.runner import (
             TaskRun,
             load_retrieval_task,
@@ -194,16 +215,16 @@ class Trainer:
             run_retrieval_task,
         )
         from codeintel.indexing.chunker import Chunker
+        from codeintel.retrieval.query import clean_issue_query
 
-        ks = [1, 5, 10, 20]
+        ks = [1, 5, 10, 20, 50]
         run = TaskRun()
-        systems = [("student", self.student, "dense")]
         self.student.model.eval()
         try:
             if task.type == "retrieval":
                 if self._dev is None:
                     self._dev = load_retrieval_task(task, self.cfg.seed)
-                run_retrieval_task(self._dev, systems, ks, None, run)
+                run_retrieval_task(self._dev, [("student", self.student, "dense")], ks, None, run)
                 metrics = run.results["doc"]["student"].metrics
                 score = metrics["ndcg@10"]
             else:
@@ -212,9 +233,11 @@ class Trainer:
                 if self._dev is None:
                     self._dev = read_records(task.path, LocalizationCase)
                 repos = Path(task.repos_dir or Path(task.path).parent / "repos")
-                run_localization_task(self._dev, repos, Chunker(), systems, ks, None, run)
-                metrics = run.results["file"]["student"].metrics
-                score = metrics["recall@10"]
+                systems = [("bm25", None, "bm25"), ("student/dense", self.student, "dense"), ("student/hybrid", self.student, "hybrid")]
+                run_localization_task(self._dev, repos, Chunker(), systems, ks, None, run, query_transform=partial(clean_issue_query, max_chars=1200))
+                by = {name: res.metrics for name, res in run.results["symbol"].items()}
+                metrics = {f"{name}:{k}": v for name, m in by.items() for k, v in m.items() if k in ("ndcg@10", "recall@10", "recall@50")}
+                score = by["student/hybrid"]["ndcg@10"]
         finally:
             self.student.model.train()
         self._log({"event": "eval", **{k: v for k, v in metrics.items() if isinstance(v, float)}})
@@ -224,13 +247,13 @@ class Trainer:
     def _log(self, row: dict) -> None:
         with open(self.log_path, "a") as f:
             f.write(json.dumps(row) + "\n")
+        if row.get("event") == "eval" or row.get("step", 0) % (self.cfg.log_every * 4) == 0 or row.get("step") == 1:
+            shown = {k: round(v, 4) if isinstance(v, float) else v for k, v in row.items() if k not in ("event",)}
+            print(f"[{row.get('event')}] {shown}", flush=True)  # progress when stdout is streamed from a remote job
 
     def _batches(self):
-        epoch = 0
-        while True:
-            for idx in self.sampler:
-                yield [self.records[i] for i in idx]
-            epoch += 1
+        for idx in self.sampler:
+            yield [self.groups[i] for i in idx]
 
     def train(self) -> Path:
         cfg = self.cfg
@@ -241,7 +264,7 @@ class Trainer:
         for recs in self._batches():
             if step >= self.total_steps:
                 break
-            batch = make_batch(recs, cfg.hard_negatives, self.rng, self.student.query_prefix, self.student.document_prefix)
+            batch = make_batch(recs, cfg.hard_negatives, self.rng, self.student.query_prefix, self.student.document_prefix, cfg.max_positives)
             if cfg.mini_batch_size and cfg.mini_batch_size < len(batch.documents):
                 logs = self._step_gradcache(batch, cfg.mini_batch_size)
             else:
@@ -263,14 +286,14 @@ class Trainer:
                         **logs,
                     }
                 )
-            if cfg.dev_task is not None and step % cfg.eval_every == 0:
+            if cfg.dev_task is not None and cfg.eval_every > 0 and step % cfg.eval_every == 0:
                 score = self.evaluate()
                 if score is not None and score > self.best_score:
                     self.best_score = score
                     self.save(self.out_dir / "best")
         final = self.out_dir / "final"
         self.save(final)
-        if cfg.dev_task is not None:
+        if cfg.dev_task is not None and cfg.eval_every > 0:  # eval_every <= 0: no in-training evaluation at all
             score = self.evaluate()
             if score is not None and score > self.best_score:
                 self.best_score = score

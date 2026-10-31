@@ -1,13 +1,15 @@
 # Repositories used to build benchmarks and training data. Cloned by `scripts/prepare_dataset.py clone`.
 #
-# role: eval  -> held out. Used for the temporal localization benchmark; never mined for training pairs.
-# role: train -> mined for training pairs (commits strictly before the training cutoff).
+# role: eval  -> held out. Issue/commit localization and docstring benchmarks; never mined for training pairs.
+# role: train -> mined for training pairs (commits strictly before the training cutoff; issue pairs from any date).
+#                A repository may not appear under more than one role (checked by URL).
 # license: SPDX expression, required for every repo and recorded in repos.lock.json. Train repos must be
 #          permissive (codeintel.data.licenses.PERMISSIVE); `pairs` checks the declaration against the licence
 #          files at every mined revision and skips the repo or commit on any mismatch.
 #
-# Evaluation commits are taken after both candidate checkpoints were published (2025-01-20), so commit
-# messages cannot have been in either candidate's training data.
+# role: dev   -> held out from training and evaluation; used only to choose settings (fusion weight, interpolation).
+#
+# Evaluation issues are taken from 2025-03-01 onwards. Very large monorepos are avoided to keep indexing cheap.
 shallow_since: "2025-01-01"
 repos:
   - {name: pytest, url: https://github.com/pytest-dev/pytest, language: python, license: MIT, role: eval}

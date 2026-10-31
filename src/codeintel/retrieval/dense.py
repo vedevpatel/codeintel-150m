@@ -23,9 +23,6 @@ class DenseIndex:
         self.embeddings = np.asarray(embeddings, dtype=np.float32)
         self.query_block = query_block
 
-    def __len__(self) -> int:
-        return len(self.embeddings)
-
     def search(self, queries: np.ndarray, k: int = 10) -> tuple[np.ndarray, np.ndarray]:
         queries = np.atleast_2d(np.asarray(queries, dtype=np.float32))
         all_idx, all_scores = [], []

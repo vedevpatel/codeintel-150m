@@ -49,3 +49,129 @@ repos:
   - {name: playwright, url: https://github.com/microsoft/playwright, language: typescript, license: Apache-2.0, role: eval}
   - {name: ant-design, url: https://github.com/ant-design/ant-design, language: typescript, license: MIT, role: eval}
   - {name: tanstack-router, url: https://github.com/TanStack/router, language: typescript, license: MIT, role: eval}
+  # Training sources. Permissive licences only (checked at every mined revision); deeper history for older issues.
+  # directus (BUSL-1.1), tldraw (custom) and streamlit/storybook/ionic (>1 GB) are deliberately not used.
+  - {name: pandas, url: https://github.com/pandas-dev/pandas, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: gradio, url: https://github.com/gradio-app/gradio, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: tanstack-query, url: https://github.com/TanStack/query, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: react-router, url: https://github.com/remix-run/react-router, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: language-tools, url: https://github.com/vuejs/language-tools, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: typeorm, url: https://github.com/typeorm/typeorm, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  # Development repositories: disjoint from every training and evaluation repository, never trained on.
+  - {name: bokeh, url: https://github.com/bokeh/bokeh, language: python, license: BSD-3-Clause, role: dev}
+  - {name: numpy, url: https://github.com/numpy/numpy, language: python, license: BSD-3-Clause, role: dev}
+  - {name: pillow, url: https://github.com/python-pillow/Pillow, language: python, license: HPND, role: dev}
+  - {name: dask, url: https://github.com/dask/dask, language: python, license: BSD-3-Clause, role: dev}
+  - {name: poetry, url: https://github.com/python-poetry/poetry, language: python, license: MIT, role: dev}
+  - {name: excalidraw, url: https://github.com/excalidraw/excalidraw, language: typescript, license: MIT, role: dev}
+  - {name: jest, url: https://github.com/jestjs/jest, language: typescript, license: MIT, role: dev}
+  - {name: nest, url: https://github.com/nestjs/nest, language: typescript, license: MIT, role: dev}
+  - {name: trpc, url: https://github.com/trpc/trpc, language: typescript, license: MIT, role: dev}
+  - {name: docusaurus, url: https://github.com/facebook/docusaurus, language: typescript, license: MIT, role: dev}
+  - {name: sphinx, url: https://github.com/sphinx-doc/sphinx, language: python, license: BSD-2-Clause, role: dev}
+  - {name: strapi, url: https://github.com/strapi/strapi, language: typescript, license: MIT, role: dev}
+  - {name: diffusers, url: https://github.com/huggingface/diffusers, language: python, license: Apache-2.0, role: dev}
+  - {name: pytorch-lightning, url: https://github.com/Lightning-AI/pytorch-lightning, language: python, license: Apache-2.0, role: dev}
+  - {name: puppeteer, url: https://github.com/puppeteer/puppeteer, language: typescript, license: Apache-2.0, role: dev}
+  - {name: langchainjs, url: https://github.com/langchain-ai/langchainjs, language: typescript, license: MIT, role: dev}
+  - {name: apollo-client, url: https://github.com/apollographql/apollo-client, language: typescript, license: MIT, role: dev}
+  # Training sources: permissive SPDX licences from the GitHub API, verified again against the licence file at every
+  # mined revision; none is an eval or dev repository or vendored by one.
+  - {name: pre-commit, url: https://github.com/pre-commit/pre-commit, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: attrs, url: https://github.com/python-attrs/attrs, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: uvicorn, url: https://github.com/Kludex/uvicorn, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: nox, url: https://github.com/wntrblm/nox, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: accelerate, url: https://github.com/huggingface/accelerate, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: jinja, url: https://github.com/pallets/jinja, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: marshmallow, url: https://github.com/marshmallow-code/marshmallow, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: starlette, url: https://github.com/Kludex/starlette, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: werkzeug, url: https://github.com/pallets/werkzeug, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: optuna, url: https://github.com/optuna/optuna, language: python, license: MIT AND BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: zarr-python, url: https://github.com/zarr-developers/zarr-python, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: peft, url: https://github.com/huggingface/peft, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: trl, url: https://github.com/huggingface/trl, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: huggingface-hub, url: https://github.com/huggingface/huggingface_hub, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: hatch, url: https://github.com/pypa/hatch, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: seaborn, url: https://github.com/mwaskom/seaborn, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: sqlfluff, url: https://github.com/sqlfluff/sqlfluff, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: keras, url: https://github.com/keras-team/keras, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: geopandas, url: https://github.com/geopandas/geopandas, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: statsmodels, url: https://github.com/statsmodels/statsmodels, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: napari, url: https://github.com/napari/napari, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: panel, url: https://github.com/holoviz/panel, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: altair, url: https://github.com/vega/altair, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: qiskit, url: https://github.com/Qiskit/qiskit, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: scipy, url: https://github.com/scipy/scipy, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: dash, url: https://github.com/plotly/dash, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: saleor, url: https://github.com/saleor/saleor, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: prefect, url: https://github.com/PrefectHQ/prefect, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: great-expectations, url: https://github.com/fivetran/great_expectations, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: wagtail, url: https://github.com/wagtail/wagtail, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: vllm, url: https://github.com/vllm-project/vllm, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: pyvista, url: https://github.com/pyvista/pyvista, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: hydra, url: https://github.com/hydra-ecosystem/hydra, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: plotly-py, url: https://github.com/plotly/plotly.py, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: transformers, url: https://github.com/huggingface/transformers, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: zulip, url: https://github.com/zulip/zulip, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: airflow, url: https://github.com/apache/airflow, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: torchvision, url: https://github.com/pytorch/vision, language: python, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: dagster, url: https://github.com/dagster-io/dagster, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: mlflow, url: https://github.com/mlflow/mlflow, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: jupyter-notebook, url: https://github.com/jupyter/notebook, language: typescript, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: zustand, url: https://github.com/pmndrs/zustand, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: swr, url: https://github.com/vercel/swr, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: pinia, url: https://github.com/vuejs/pinia, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: vue-router, url: https://github.com/vuejs/router, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: vitepress, url: https://github.com/vuejs/vitepress, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: radix-primitives, url: https://github.com/radix-ui/primitives, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: slate, url: https://github.com/ianstormtaylor/slate, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: react-hook-form, url: https://github.com/react-hook-form/react-hook-form, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: redux-toolkit, url: https://github.com/reduxjs/redux-toolkit, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: sveltekit, url: https://github.com/sveltejs/kit, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: tanstack-form, url: https://github.com/TanStack/form, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: tanstack-table, url: https://github.com/TanStack/table, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: shadcn-ui, url: https://github.com/shadcn-ui/ui, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: sequelize, url: https://github.com/sequelize/sequelize, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: mikro-orm, url: https://github.com/mikro-orm/mikro-orm, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: elysia, url: https://github.com/elysiajs/elysia, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: svelte, url: https://github.com/sveltejs/svelte, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: pixijs, url: https://github.com/pixijs/pixijs, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: lexical, url: https://github.com/facebook/lexical, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: angular-components, url: https://github.com/angular/components, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: effect, url: https://github.com/Effect-TS/effect, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: angular-cli, url: https://github.com/angular/angular-cli, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: payload, url: https://github.com/payloadcms/payload, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: echarts, url: https://github.com/apache/echarts, language: typescript, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: xstate, url: https://github.com/statelyai/xstate, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: chakra-ui, url: https://github.com/chakra-ui/chakra-ui, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: jupyterlab, url: https://github.com/jupyterlab/jupyterlab, language: typescript, license: BSD-3-Clause, role: train, shallow_since: "2023-01-01"}
+  - {name: keystone, url: https://github.com/keystonejs/keystone, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: react-admin, url: https://github.com/marmelab/react-admin, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: redwood, url: https://github.com/redwoodjs/graphql, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: cypress, url: https://github.com/cypress-io/cypress, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: quasar, url: https://github.com/quasarframework/quasar, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: angular, url: https://github.com/angular/angular, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: material-ui, url: https://github.com/mui/material-ui, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: appsmith, url: https://github.com/appsmithorg/appsmith, language: typescript, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: element-plus, url: https://github.com/element-plus/element-plus, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: nx, url: https://github.com/nrwl/nx, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  # Further established, permissively licensed Python/TypeScript projects
+  # with >= 250 usable issue -> PR links since 2023 (scripts/probe_repos.py); licences re-verified at every mined revision.
+  - {name: ray, url: https://github.com/ray-project/ray, language: python, license: Apache-2.0 AND BSD-3-Clause AND MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: openhands, url: https://github.com/openhands/openhands, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: storybook, url: https://github.com/storybookjs/storybook, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: llama_index, url: https://github.com/run-llama/llama_index, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: expo, url: https://github.com/expo/expo, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: librechat, url: https://github.com/librechat-ai/librechat, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: streamlit, url: https://github.com/streamlit/streamlit, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: docling, url: https://github.com/docling-project/docling, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: superset, url: https://github.com/apache/superset, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: crewai, url: https://github.com/crewaiinc/crewai, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: mem0, url: https://github.com/mem0ai/mem0, language: python, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: supabase, url: https://github.com/supabase/supabase, language: typescript, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: tailwindcss, url: https://github.com/tailwindlabs/tailwindcss, language: typescript, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: prisma, url: https://github.com/prisma/orm, language: typescript, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: langflow, url: https://github.com/langflow-ai/langflow, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: colossalai, url: https://github.com/hpcaitech/colossalai, language: python, license: Apache-2.0 AND BSD-3-Clause AND MIT, role: train, shallow_since: "2023-01-01"}
+  - {name: gemini-cli, url: https://github.com/google-gemini/gemini-cli, language: typescript, license: Apache-2.0, role: train, shallow_since: "2023-01-01"}
+  - {name: openpilot, url: https://github.com/commaai/openpilot, language: python, license: MIT, role: train, shallow_since: "2023-01-01"}

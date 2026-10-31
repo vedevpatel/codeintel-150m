@@ -3,8 +3,8 @@
 CodeIntel is a 149M-parameter embedding model for **issue-to-code localization**: given a bug report or feature
 request, it retrieves the functions and classes in a Python or TypeScript repository that a fix is likely to
 modify. On issues that describe only symptoms, with no reference to the relevant code, it outperforms every other
-open embedding model of comparable size by **roughly 55%**. It also leads on issues that reference code directly
-(+27%) and on test-to-implementation retrieval (+23%). Beyond localization, it supports code search and
+open embedding model of comparable size by **roughly 55%**. It is also **27% better** on issues that reference code directly
+and **23% better** at test-to-implementation retrieval. Beyond localization, it supports code search and
 call-site-to-definition navigation.
 
 It runs locally, including as a 325 MB INT8 ONNX model on CPU, and is released under Apache-2.0. It was trained only on

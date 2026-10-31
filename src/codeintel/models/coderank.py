@@ -19,6 +19,7 @@ Reviewed remote code (revision 3c4b60807d71f79b43f3c4363786d9493691f8b1):
 from __future__ import annotations
 
 import types
+from pathlib import Path
 
 import torch
 
@@ -64,3 +65,39 @@ def apply_transformers5_compat(model: torch.nn.Module) -> None:
 
 class CodeRankEmbedAdapter(TransformerEmbedder):
     spec = CODERANK_SPEC
+
+
+class NativeCodeRankEmbedAdapter(TransformerEmbedder):
+    """CodeRankEmbed (or a fine-tune of it) on the native NomicBERT module: no repository code is executed.
+
+    Same inference contract as `CodeRankEmbedAdapter`; for local fine-tuned checkpoints the adapter spec saved with
+    the weights is used. The architecture is verified against the reviewed reference (see models/nomic_bert.py).
+    """
+
+    spec = CODERANK_SPEC
+
+    def __init__(self, cfg):
+        from dataclasses import replace
+
+        from codeintel.models.base import ADAPTER_SPEC_FILE, load_adapter_spec
+
+        if cfg.local_dir and (Path(cfg.local_dir) / ADAPTER_SPEC_FILE).exists():
+            self.spec = replace(load_adapter_spec(cfg.local_dir), requires_remote_code=False)
+        else:
+            self.spec = replace(CODERANK_SPEC, requires_remote_code=False)
+        super().__init__(replace(cfg, trust_remote_code=False))
+
+    def load_backbone(self, cfg):
+        from codeintel.models.nomic_bert import NomicBertEncoder
+
+        return NomicBertEncoder.from_snapshot(self.snapshot)
+
+    def load_tokenizer(self):
+        from transformers import AutoTokenizer, BertConfig
+
+        # tokenizer_config.json names BertTokenizer; a stand-in config stops AutoTokenizer from parsing config.json
+        # (a NomicBERT config, which only the remote code understands).
+        return AutoTokenizer.from_pretrained(str(self.snapshot), config=BertConfig(), trust_remote_code=False)
+
+    def save(self, output_dir) -> None:
+        raise NotImplementedError("the native NomicBERT module is for inference; save from the reference adapter")

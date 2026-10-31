@@ -36,7 +36,7 @@ in [docs/evaluation.md](docs/evaluation.md).
 ```python
 from sentence_transformers import SentenceTransformer
 
-model = SentenceTransformer("<hub-id>/CodeIntel")
+model = SentenceTransformer("vedevpatel/CodeIntel-150M")
 code = [
     "# src/server/app.py::App.run\ndef run(self, host=None, port=None, debug=None):\n    ...",
     "# src/utils/date.ts::parseDate\nexport function parseDate(s: string): Date { return new Date(s); }",

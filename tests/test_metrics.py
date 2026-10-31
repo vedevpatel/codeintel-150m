@@ -66,3 +66,23 @@ def test_bootstrap_ci_brackets_mean():
     vals = [0.0, 1.0] * 50
     lo, hi = bootstrap_ci(vals, samples=500)
     assert lo < 0.5 < hi
+
+
+def test_cluster_statistics():
+    from codeintel.evaluation.metrics import cluster_bootstrap_ci, clustered_paired_comparison, macro_mean
+
+    values = [1.0] * 9 + [0.0]
+    clusters = ["big"] * 9 + ["small"]
+    assert macro_mean(values, clusters) == 0.5  # each repository counts once
+    lo, hi = cluster_bootstrap_ci(values, clusters, samples=500, macro=True)
+    assert lo <= 0.5 <= hi
+    # One large repository strongly favours A; three small ones slightly favour B.
+    a = [1.0] * 20 + [0.4] * 6
+    b = [0.0] * 20 + [0.5] * 6
+    cmp = clustered_paired_comparison(a, b, ["r1"] * 20 + ["r2", "r2", "r3", "r3", "r4", "r4"])
+    assert cmp["mean_diff"] == pytest.approx((20 - 0.6) / 26)
+    assert cmp["macro_diff"] == pytest.approx((1.0 - 0.3) / 4)
+    # The advantage comes from a single repository, so the repository-level sign-flip test cannot reject.
+    assert cmp["n_clusters"] == 4 and cmp["p_value"] == 1.0
+    uniform = clustered_paired_comparison([1.0] * 8, [0.0] * 8, [f"r{i}" for i in range(8)])
+    assert uniform["p_value"] == pytest.approx(2 / 2**8)  # exact minimum with 8 repositories

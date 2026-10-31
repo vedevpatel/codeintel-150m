@@ -81,8 +81,6 @@ def export_onnx(
     out_dir: str | Path,
     opset: int = 17,
     quantize: bool = True,
-    trace_length: int = 64,
-    dynamo: bool = False,
     full_int8: bool = False,
 ) -> dict:
     import onnxruntime as ort
@@ -92,6 +90,7 @@ def export_onnx(
     embedder.model.to(device="cpu", dtype=torch.float32).eval()
     embedder.device = torch.device("cpu")
     wrapper = PooledEncoder(embedder).eval()
+    trace_length = 64  # sequence axis is dynamic; verification covers longer inputs
     dummy = embedder.tokenizer(
         ["x " * trace_length, "y"], padding="max_length", truncation=True, max_length=trace_length,
         return_tensors="pt", return_token_type_ids=False,
@@ -106,7 +105,7 @@ def export_onnx(
             output_names=["embedding"],
             dynamic_axes={"input_ids": {0: "batch", 1: "sequence"}, "attention_mask": {0: "batch", 1: "sequence"}, "embedding": {0: "batch"}},
             opset_version=opset,
-            dynamo=dynamo,
+            dynamo=False,
             do_constant_folding=True,
         )
     reference = embedder.encode_documents(VERIFY_TEXTS)
@@ -137,7 +136,7 @@ def export_onnx(
 class OnnxEmbedder(EmbeddingModel):
     """CPU inference from an export directory (model.onnx / model_int8.onnx + tokenizer + adapter spec)."""
 
-    def __init__(self, cfg: ModelConfig, variant: str | None = None, threads: int | None = None):
+    def __init__(self, cfg: ModelConfig):
         import onnxruntime as ort
         from transformers import AutoTokenizer
 
@@ -147,12 +146,8 @@ class OnnxEmbedder(EmbeddingModel):
         raw = json.loads((directory / ADAPTER_SPEC_FILE).read_text())
         self.query_prefix = raw.get("query_prefix", self.spec.query_prefix) if cfg.query_prefix is None else cfg.query_prefix
         self.document_prefix = raw.get("document_prefix", self.spec.document_prefix) if cfg.document_prefix is None else cfg.document_prefix
-        variant = variant or ("int8" if cfg.dtype == "int8" else "fp32")
-        self.model_path = directory / ("model_int8.onnx" if variant == "int8" else "model.onnx")
-        opts = ort.SessionOptions()
-        if threads:
-            opts.intra_op_num_threads = threads
-        self.session = ort.InferenceSession(str(self.model_path), opts, providers=["CPUExecutionProvider"])
+        self.model_path = directory / ("model_int8.onnx" if cfg.dtype == "int8" else "model.onnx")
+        self.session = ort.InferenceSession(str(self.model_path), providers=["CPUExecutionProvider"])
         self.tokenizer = AutoTokenizer.from_pretrained(str(directory))
         self.max_length = cfg.max_length or self.spec.recommended_max_length
         self.batch_size = cfg.batch_size

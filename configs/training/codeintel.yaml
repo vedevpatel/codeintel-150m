@@ -1,0 +1,39 @@
+# CodeIntel training recipe: multi-positive InfoNCE with hard negatives and GradCache, distillation toward the frozen
+# base, and a fixed mixture of training sources (source_shares). scripts/run_train.sh overrides the model, packed data,
+# dev task and output directory at run time.
+model: configs/models/granite-r2.yaml
+packed_groups: artifacts/train/groups.json.gz   # scripts/pack_training.py
+train_files: []
+output_dir: artifacts/checkpoints/codeintel
+max_steps: 3000
+batch_size: 128
+mini_batch_size: 64
+max_positives: 3
+hard_negatives: 2
+temperature: 0.05
+symmetric_loss: true
+learning_rate: 5.0e-6
+weight_decay: 0.01
+warmup_ratio: 0.05
+max_query_length: 256
+max_document_length: 512
+precision: bf16
+gradient_checkpointing: false
+distill_weight: 0.5         # pull toward the frozen base's similarity structure (keeps general search)
+distill_temperature: 0.05
+interpolate_alpha: 1.0      # interpolation is applied afterwards, chosen on dev
+eval_every: 1000            # logging only; the final checkpoint is exported
+log_every: 25
+seed: 13
+# Shares are normalised: 34% issue and commit text, 66% search, navigation and code-context pairs.
+source_shares:
+  issues: 0.20
+  commits: 0.03
+  docstring: 0.08
+  vault-docstring: 0.08
+  calls: 0.03
+  tests: 0.06
+  ccr: 0.04
+  csn-code2doc: 0.06        # CodeSearchNet train, permissive licence at the row's commit: code -> documentation string
+  csn-ccr: 0.06             # same rows: code up to a 40-70% character cut -> the rest
+  csn-docstring: 0.03       # same rows: documentation string -> code

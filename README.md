@@ -1,13 +1,10 @@
 # CodeIntel
 
-> **About 55% better than any other open ~150M embedding model at finding the code a bug report is about.**
-> On 3,804 held-out GitHub issues that name no code, CodeIntel scores nDCG@10 **0.268 / 0.274** (Python /
-> TypeScript) against **0.173 / 0.178** for the next-best of seven open models its size. It also leads on issues
-> that do name code (+27%) and on test -> implementation search (+23%).
-
-CodeIntel is a 149M-parameter embedding model for **finding the code an issue, bug report or test is about**. Given
-the text of an issue, it retrieves the functions and classes in a Python or TypeScript repository that a fix will
-touch. It also handles code search and code-to-code navigation (test -> implementation, call site -> definition).
+CodeIntel is a 149M-parameter embedding model for **finding the code a bug report is about**. Give it an issue
+written by a user and it retrieves the functions and classes in a Python or TypeScript repository that a fix will
+touch. When the issue only describes a symptom and names no code, it does this **about 55% better than any other open
+model its size**. It is also ahead when the issue does name code (+27%) and at matching tests to the code they cover
+(+23%). It also handles code search and call site -> definition navigation.
 
 It runs locally, including as a 325 MB INT8 ONNX model on CPU, and is released under Apache-2.0. It was trained only on
 permissively licensed code.

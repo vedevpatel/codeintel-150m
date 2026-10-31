@@ -38,11 +38,6 @@ def full_recall_at_k(ranked: Sequence[str], relevant: Relevance | set[str], k: i
     return float(bool(rel) and rel.keys() <= set(ranked[:k]))
 
 
-def precision_at_k(ranked: Sequence[str], relevant: Relevance | set[str], k: int) -> float:
-    rel = _rel(relevant)
-    return sum(1 for doc in ranked[:k] if doc in rel) / k if k else 0.0
-
-
 def mrr_at_k(ranked: Sequence[str], relevant: Relevance | set[str], k: int | None = None) -> float:
     rel = _rel(relevant)
     for i, doc in enumerate(ranked[:k] if k else ranked):
@@ -136,4 +131,81 @@ def paired_comparison(
         "ci_high": float(np.quantile(boot, 1 - alpha / 2)),
         "p_value": float(p),
         "n": int(len(x)),
+    }
+
+
+# ---------------------------------------------------------------------- repository-clustered statistics
+
+
+def _by_cluster(values: Sequence[float], clusters: Sequence[str]) -> list[np.ndarray]:
+    groups: dict[str, list[float]] = {}
+    for v, c in zip(values, clusters):
+        groups.setdefault(c, []).append(v)
+    return [np.asarray(groups[c], dtype=np.float64) for c in sorted(groups)]
+
+
+def macro_mean(values: Sequence[float], clusters: Sequence[str]) -> float:
+    """Mean of per-cluster (per-repository) means: every repository counts equally."""
+    groups = _by_cluster(values, clusters)
+    return float(np.mean([g.mean() for g in groups])) if groups else 0.0
+
+
+def cluster_bootstrap_ci(
+    values: Sequence[float],
+    clusters: Sequence[str],
+    samples: int = 1000,
+    seed: int = 0,
+    alpha: float = 0.05,
+    macro: bool = False,
+) -> tuple[float, float]:
+    """Bootstrap CI that resamples whole clusters (repositories), so correlated queries are not over-counted.
+
+    `macro=False` gives the CI of the case-weighted mean, `macro=True` of the repository-weighted mean.
+    """
+    groups = _by_cluster(values, clusters)
+    if not groups:
+        return (0.0, 0.0)
+    rng = np.random.default_rng(seed)
+    sums = np.array([g.sum() for g in groups])
+    counts = np.array([len(g) for g in groups])
+    means = sums / counts
+    picks = rng.integers(0, len(groups), size=(samples, len(groups)))
+    stats = means[picks].mean(axis=1) if macro else sums[picks].sum(axis=1) / counts[picks].sum(axis=1)
+    return float(np.quantile(stats, alpha / 2)), float(np.quantile(stats, 1 - alpha / 2))
+
+
+def clustered_paired_comparison(
+    a: Sequence[float], b: Sequence[float], clusters: Sequence[str], samples: int = 10000, seed: int = 0, alpha: float = 0.05
+) -> dict[str, float]:
+    """A vs B on the same queries, with repositories as the unit of resampling.
+
+    Reports the case-weighted and repository-weighted (macro) mean differences, a cluster-bootstrap CI for
+    each, and a cluster-level sign-flip p-value for the macro difference (exact when <= 16 repositories).
+    """
+    x = np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    groups = _by_cluster(list(x), list(clusters))
+    if not groups:
+        return {"mean_diff": 0.0, "ci_low": 0.0, "ci_high": 0.0, "macro_diff": 0.0, "macro_ci_low": 0.0,
+                "macro_ci_high": 0.0, "p_value": 1.0, "n": 0, "n_clusters": 0}
+    lo, hi = cluster_bootstrap_ci(list(x), list(clusters), samples, seed, alpha, macro=False)
+    mlo, mhi = cluster_bootstrap_ci(list(x), list(clusters), samples, seed, alpha, macro=True)
+    d = np.array([g.mean() for g in groups])
+    observed = abs(d.mean())
+    k = len(d)
+    if k <= 16:
+        signs = ((np.arange(2**k)[:, None] >> np.arange(k)) & 1) * 2 - 1
+    else:
+        signs = np.random.default_rng(seed).choice([-1.0, 1.0], size=(samples, k))
+    flipped = np.abs((signs * d).mean(axis=1))
+    p = float(np.mean(flipped >= observed - 1e-12))
+    return {
+        "mean_diff": float(x.mean()),
+        "ci_low": lo,
+        "ci_high": hi,
+        "macro_diff": float(d.mean()),
+        "macro_ci_low": mlo,
+        "macro_ci_high": mhi,
+        "p_value": p,
+        "n": int(len(x)),
+        "n_clusters": k,
     }

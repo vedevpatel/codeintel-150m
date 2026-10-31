@@ -1,6 +1,7 @@
 import numpy as np
 
 from codeintel.data.mining import mine_commits, mine_snapshot
+from codeintel.data.schemas import LocalizationCase
 from codeintel.indexing.chunker import Chunker, ChunkerConfig
 from codeintel.indexing.repository import iter_source_files, iter_source_files_at_commit
 from codeintel.indexing.storage import CodeIndex, EmbeddingCache, build_index, encode_documents_cached
@@ -155,3 +156,169 @@ def test_attribute_only_change_is_gold_with_skeleton_symbol(git_repo):
     ex = next(mine_commits(git_repo))
     assert ex.gold_files == ["pkg/model.py"]
     assert ex.to_case("repo").gold_symbols == ["pkg/model.py::Config"]
+
+
+def test_snapshot_loader_reuse_matches_fresh_load(git_repo):
+    from codeintel.evaluation.runner import SnapshotLoader
+
+    head = git(git_repo, "rev-parse", "HEAD").strip()
+    parent = git(git_repo, "rev-parse", "HEAD~1").strip()
+    loader = SnapshotLoader(git_repo.parent, Chunker())
+    first, second = loader.load("repo", parent), loader.load("repo", head)
+    fresh = SnapshotLoader(git_repo.parent, Chunker()).load("repo", head)
+    assert [c.chunk_id for c in second.chunks] == [c.chunk_id for c in fresh.chunks]
+    assert [c.text for c in second.chunks] != [c.text for c in first.chunks]
+    bm25 = loader.bm25(second)
+    assert bm25.search("factor zero", 1)[0][0] == next(i for i, c in enumerate(second.chunks) if c.symbol == "scale")
+
+
+def test_query_mentions_distinguishes_lexical_from_descriptive():
+    from codeintel.data.mining import query_mentions
+    from codeintel.schemas import Chunk
+
+    code = "def parse_body(self, cache):\n    body_cache = self.app.json(cache)\n    return body_cache\n"
+    gold = [Chunk("c", "src/request.py", "python", 1, 3, "method", "Request.parse_body", code, code)]
+    df = {"parse_body": 1, "body_cache": 1, "app": 500, "json": 400, "cache": 2}
+    files = ["src/request.py"]
+    assert query_mentions("parse_body() breaks later calls", files, gold, df, 1000) == ["parse_body"]
+    assert query_mentions("crash in `cache` handling", files, gold, df, 1000) == ["cache"]
+    assert query_mentions("Traceback ... File \"pkg/src/request.py\", line 3", files, gold, df, 1000) == ["src/request.py"]
+    # Ubiquitous tokens, plain English, and fence language tags do not count.
+    assert query_mentions("```py\napp.json()\n```\nreading the body twice fails", files, gold, df, 1000) == []
+
+
+def test_resolve_pr_base_for_squash_and_rebase(git_repo):
+    from codeintel.data.mining import resolve_pr_base
+
+    base = git(git_repo, "rev-parse", "HEAD").strip()
+    for i in range(2):
+        (git_repo / f"f{i}.py").write_text(f"x = {i}\n")
+        git(git_repo, "add", "-A")
+        git(git_repo, "commit", "-q", "-m", f"commit {i}")
+    head = git(git_repo, "rev-parse", "HEAD").strip()
+    # A rebase-merged PR of 2 commits touching 2 files resolves to the commit before both.
+    assert resolve_pr_base(git_repo, head, 1, 2, 2) == base
+    # A squash-merged PR (1 file in the merge commit) resolves to the parent.
+    assert resolve_pr_base(git_repo, head, 1, 5, 1) == git(git_repo, "rev-parse", "HEAD~1").strip()
+    # File counts that match no candidate range are rejected rather than guessed.
+    assert resolve_pr_base(git_repo, head, 1, 3, 7) is None
+
+
+def test_gold_labels_exclude_new_code_tests_and_docs(git_repo):
+    from codeintel.data.mining import gold_from_diff
+
+    base = git(git_repo, "rev-parse", "HEAD").strip()
+    src = (git_repo / "pkg" / "math_utils.py").read_text()
+    # Add a brand-new function between existing ones, edit inside `add`, add a new module, a test, and docs.
+    src = src.replace("    return a + b\n", "    total = a + b\n    return total\n", 1)
+    src = src.replace("\n\ndef scale(", "\n\ndef clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n\n\ndef scale(", 1)
+    (git_repo / "pkg" / "math_utils.py").write_text(src)
+    (git_repo / "pkg" / "new_mod.py").write_text("def fresh():\n    return 1\n")
+    (git_repo / "tests").mkdir()
+    (git_repo / "tests" / "test_math.py").write_text("def test_add():\n    assert True\n")
+    (git_repo / "docs").mkdir()
+    (git_repo / "docs" / "conf.py").write_text("project = 'x'\n")
+    (git_repo / "CHANGELOG.md").write_text("- fix\n")
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "change")
+    labels = gold_from_diff(git_repo, base, "HEAD", frozenset({"python"}), Chunker(), max_source_files=10)
+    assert labels.gold_files == ["pkg/math_utils.py"]
+    assert labels.gold_symbols == ["pkg/math_utils.py::add"]  # `scale` is a neighbour of the insertion, not gold
+    assert sorted(labels.created_symbols) == ["pkg/math_utils.py::clamp", "pkg/new_mod.py::fresh"]
+    assert labels.excluded == {"added_source": 1, "docs": 1, "non_source": 1, "test": 1}
+    meta = labels.meta()
+    assert meta["file_recall_ceiling"] == 0.5 and meta["symbol_recall_ceiling"] == 1 / 3
+    assert gold_from_diff(git_repo, base, "HEAD", frozenset({"python"}), Chunker(), max_source_files=1) == "too_many_files"
+
+
+def test_stack_traces_count_as_lexical_mentions():
+    from codeintel.data.mining import query_mentions
+    from codeintel.schemas import Chunk
+
+    code = "def to_netcdf(self, path):\n    return write_dataset(self, path)\n"
+    gold = [Chunk("c", "xarray/core/dataset.py", "python", 1, 2, "method", "Dataset.to_netcdf", code, code)]
+    files = ["xarray/core/dataset.py"]
+    py_trace = 'Traceback (most recent call last):\n  File "/venv/lib/python3.12/site-packages/xarray/core/dataset.py", line 2\nKeyError: 3'
+    assert "xarray/core/dataset.py" in query_mentions(py_trace, files, gold, {}, 100)
+    js_code = "export function parseBody(req) {\n  return req.body\n}\n"
+    js_gold = [Chunk("c", "src/request.ts", "typescript", 1, 3, "function", "parseBody", js_code, js_code)]
+    js_trace = "TypeError: x is undefined\n    at parseBody (file:///app/node_modules/hono/dist/request.js:12:5)"
+    assert query_mentions(js_trace, ["src/request.ts"], js_gold, {}, 100) == ["parseBody"]
+
+
+def test_original_issue_text_policy():
+    from codeintel.data.github import original_issue_text
+
+    base = {"title": "now", "body": "edited body with src/x.py", "createdAt": "2025-05-01T10:00:00Z"}
+    assert original_issue_text({**base, "lastEditedAt": None}) == ("now", "edited body with src/x.py", "unedited")
+    history = {
+        **base,
+        "lastEditedAt": "2025-05-03T00:00:00Z",
+        "includesCreatedEdit": True,
+        "userContentEdits": {"nodes": [{"editedAt": "2025-05-01T10:00:00Z", "diff": "original body"}]},
+        "timelineItems": {"nodes": [{"previousTitle": "first title"}]},
+    }
+    assert original_issue_text(history) == ("first title", "original body", "edit-history")
+    lost = {**history, "includesCreatedEdit": False}
+    assert original_issue_text(lost)[1:] == (None, "unrecoverable")
+
+
+def test_backticked_cli_flags_are_not_identifier_mentions():
+    from codeintel.data.mining import query_mentions
+    from codeintel.schemas import Chunk
+
+    code = 'def addoption(parser):\n    parser.addoption("--version", "--override-ini", dest="override_ini")\n'
+    gold = [Chunk("c", "src/main.py", "python", 1, 2, "function", "addoption", code, code)]
+    df = {"version": 3, "override": 2, "ini": 3, "override_ini": 1}
+    assert query_mentions("`pytest --version` loads plugins; also `--override-ini`", ["src/main.py"], gold, df, 1000) == []
+    assert query_mentions("the `override_ini` option", ["src/main.py"], gold, df, 1000) == ["override_ini"]
+
+
+def test_rich_chunk_context_adds_class_and_module_lines_only_when_requested():
+    text = '"""Inventory service. More."""\n\nclass Inventory(Base):\n    """Items keyed by SKU. Extra."""\n\n    def remove(self, sku):\n        return 1\n\ndef helper(x):\n    return x\n'
+    source = SourceFile("pkg/inv.py", "python", text)
+    basic = {c.symbol: c.text for c in Chunker().chunk(source)}
+    rich = {c.symbol: c.text for c in Chunker(ChunkerConfig(context="rich")).chunk(source)}
+    assert basic["Inventory.remove"] == "# pkg/inv.py::Inventory.remove\ndef remove(self, sku):\n    return 1"
+    assert rich["Inventory.remove"].splitlines()[:3] == [
+        "# pkg/inv.py::Inventory.remove", "# module: Inventory service.", "# in class Inventory(Base) -- Items keyed by SKU."]
+    assert "in class" not in rich["helper"] and rich["helper"].splitlines()[1] == "# module: Inventory service."
+    # Line ranges and raw code are untouched by the added context.
+    plain, ctx = Chunker().chunk(source), Chunker(ChunkerConfig(context="rich")).chunk(source)
+    assert [(c.start_line, c.end_line, c.code) for c in plain] == [(c.start_line, c.end_line, c.code) for c in ctx]
+    ts = SourceFile("w/cart.ts", "typescript", "export class Cart extends Base {\n  add(i: Item): void {\n    this.x = 1;\n    this.y = 2;\n  }\n}\n")
+    assert any(c.text.splitlines()[1] == "// in class Cart extends Base" for c in Chunker(ChunkerConfig(context="rich")).chunk(ts))
+
+
+def test_query_cleaning_drops_template_environment_and_long_logs():
+    from codeintel.retrieval.query import clean_issue_query
+
+    issue = (
+        "Cache is ignored after restart\n\n### What version of Hono are you using?\n\n4.8.3\n\n"
+        "### What runtime/platform is your app running on?\n\nNode 22.1\n\n### What steps can reproduce the bug?\n\n"
+        "Start the server twice. The second start reads nothing from the cache.\n\n```\n" + "\n".join(f"log line {i}" for i in range(40)) +
+        "\nError: cache miss\n```\n\n### Additional context\n\nOS: macOS 14.2\n_No response_\n\n<details><summary>pip list</summary>\nfoo 1.2.3\n</details>\n"
+    )
+    cleaned = clean_issue_query(issue)
+    assert cleaned.startswith("Cache is ignored after restart\n\nStart the server twice.")
+    assert "4.8.3" not in cleaned and "Node 22.1" not in cleaned and "macOS" not in cleaned and "foo 1.2.3" not in cleaned
+    assert "log line 4" in cleaned and "log line 20" not in cleaned and "Error: cache miss" in cleaned  # head and tail of the log
+    assert "No response" not in cleaned and "```" not in cleaned
+    long = "Title here\n\n" + ("A sentence about the symptom. " * 200)
+    out = clean_issue_query(long, max_chars=300)
+    assert len(out) <= 300 and out.startswith("Title here") and not out.endswith(" ")
+    assert clean_issue_query("Only a title") == "Only a title"
+
+
+def test_variant_labels_and_baseline_checkpoint_keys_are_stable():
+    from codeintel.config import EvaluationConfig
+    from codeintel.evaluation.runner import _checkpoint_key
+    from codeintel.evaluation.shard import VARIANT_PRESETS
+
+    base = EvaluationConfig(models=[], tasks=[])
+    assert base.variant == ""
+    assert EvaluationConfig(models=[], tasks=[], **VARIANT_PRESETS["both"]).variant == "chunks=rich;clean=1200"
+    assert len({EvaluationConfig(models=[], tasks=[], **p).variant for p in VARIANT_PRESETS.values()}) == 4
+    cases = [LocalizationCase(id="a#1", repo="a", query="q", gold_files=["f.py"], commit="c1")]
+    assert _checkpoint_key(cases, [], "") == _checkpoint_key(cases, [])  # the baseline key does not depend on the variant arg
+    assert _checkpoint_key(cases, [], "chunks=rich") != _checkpoint_key(cases, [], "")

@@ -75,3 +75,18 @@ def test_optional_grammars(language, module, text, expected):
     pytest.importorskip(module)
     assert has_parser(language)
     assert expected <= set(symbols(f"x.{language}", language, text))
+
+
+def test_multiline_top_level_values_are_variable_symbols():
+    ts = (
+        "export const upgradeWebSocket = defineHelper((c, events) => {\n  return events\n})\n"
+        "const short = 1\n"
+        "export default {\n  fetch: app.fetch,\n}\n"
+    )
+    syms = symbols("a.ts", "typescript", ts)
+    assert syms["upgradeWebSocket"].kind == "variable" and (syms["upgradeWebSocket"].start_line, syms["upgradeWebSocket"].end_line) == (1, 3)
+    assert "short" not in syms
+    assert syms["default"].kind == "variable"
+    py = "TABLE = {\n    'a': 1,\n}\nX = 1\n\nclass C:\n    attrs = [\n        1,\n    ]\n"
+    psyms = symbols("a.py", "python", py)
+    assert psyms["TABLE"].kind == "variable" and "X" not in psyms and "attrs" not in psyms

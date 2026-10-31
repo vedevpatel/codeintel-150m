@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from codeintel.models.base import EmbeddingModel
 
 FORMAT_VERSION = 1
+ENCODE_BATCH = 4096  # texts per encode_documents call; the cache is written after each batch
 
 
 class EmbeddingCache:
@@ -70,9 +71,21 @@ class EmbeddingCache:
 
 
 def encode_documents_cached(
-    model: EmbeddingModel, texts: Sequence[str], cache: EmbeddingCache | None = None, chunk_size: int = 4096
+    model: EmbeddingModel,
+    texts: Sequence[str],
+    cache: EmbeddingCache | None = None,
+    memo: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Encode documents, reusing cached vectors for identical texts (and deduplicating within the call)."""
+    """Encode documents, reusing cached vectors for identical texts (and deduplicating within the call).
+
+    `memo` is an optional in-memory text -> vector map. Consecutive snapshots of one repository share most of
+    their chunks, so with a memo they skip hashing and SQLite entirely and only new texts reach the cache.
+    """
+    if memo is not None:
+        missing = [t for t in dict.fromkeys(texts) if t not in memo]
+        if missing:
+            memo.update(zip(missing, encode_documents_cached(model, missing, cache)))
+        return np.stack([memo[t] for t in texts]) if len(texts) else np.zeros((0, model.dim), dtype=np.float32)
     out = np.zeros((len(texts), model.dim), dtype=np.float32)
     keys = [sha256_text(t) for t in texts]
     cached = cache.get_many(sorted(set(keys))) if cache is not None else {}
@@ -81,8 +94,8 @@ def encode_documents_cached(
         if key not in cached and key not in todo:
             todo[key] = text
     todo_keys = list(todo)
-    for i in range(0, len(todo_keys), chunk_size):
-        batch_keys = todo_keys[i : i + chunk_size]
+    for i in range(0, len(todo_keys), ENCODE_BATCH):
+        batch_keys = todo_keys[i : i + ENCODE_BATCH]
         vecs = model.encode_documents([todo[k] for k in batch_keys])
         fresh = dict(zip(batch_keys, vecs))
         cached.update(fresh)
@@ -111,7 +124,7 @@ class CodeIndex:
         (directory / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     @classmethod
-    def load(cls, directory: str | Path, mmap: bool = True) -> CodeIndex:
+    def load(cls, directory: str | Path) -> CodeIndex:
         directory = Path(directory)
         manifest = json.loads((directory / "manifest.json").read_text())
         if manifest.get("format_version") != FORMAT_VERSION:
@@ -119,7 +132,7 @@ class CodeIndex:
         with open(directory / "chunks.jsonl", encoding="utf-8") as f:
             chunks = [Chunk.from_dict(json.loads(line)) for line in f]
         emb_path = directory / "embeddings.npy"
-        embeddings = np.load(emb_path, mmap_mode="r" if mmap else None) if emb_path.exists() else None
+        embeddings = np.load(emb_path, mmap_mode="r") if emb_path.exists() else None
         if embeddings is not None and len(embeddings) != len(chunks):
             raise RuntimeError("embeddings and chunks are misaligned")
         return cls(chunks=chunks, embeddings=embeddings, manifest=manifest)

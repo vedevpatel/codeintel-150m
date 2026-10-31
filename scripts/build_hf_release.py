@@ -32,8 +32,13 @@ def main() -> int:
     spec = json.loads((src / "codeintel_adapter.json").read_text())
     assert spec["pooling"] == "cls" and spec["normalize"], spec
     out.mkdir(parents=True, exist_ok=True)
-    for name in ("config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json"):
+    for name in ("model.safetensors", "tokenizer.json", "tokenizer_config.json"):
         shutil.copy(src / name, out / name)
+    # Weights are stored in fp16; a float32 default dtype makes CPU loads upcast instead of running in slow fp16.
+    config = json.loads((src / "config.json").read_text())
+    config.pop("torch_dtype", None)
+    config["dtype"] = "float32"
+    (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     for name in ("special_tokens_map.json",):
         if (src / name).exists():
             shutil.copy(src / name, out / name)

@@ -1,7 +1,6 @@
-# Ranking impact of INT8 export. Models are passed on the command line as ONNX exports, e.g.
+# Ranking impact of INT8 export. Models are passed on the command line as ONNX exports:
 #   scripts/benchmark_models.py --config configs/evaluation/int8.yaml --out artifacts/benchmarks/int8 \
-#     --extra-models onnx:artifacts/onnx/gte-modernbert:float32 onnx:artifacts/onnx/gte-modernbert:int8 \
-#                    onnx:artifacts/onnx/coderankembed:float32 onnx:artifacts/onnx/coderankembed:int8
+#     --extra-models onnx:artifacts/onnx/<model>:float32 onnx:artifacts/onnx/<model>:int8
 models: []
 tasks:
   - name: docstrings-python

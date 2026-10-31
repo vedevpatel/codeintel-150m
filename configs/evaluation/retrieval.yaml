@@ -1,0 +1,25 @@
+# Retrieval benchmarks (docs/evaluation.md): in-repository code-to-code and docstring tasks, CoSQA, and the CoIR tasks.
+# Build them with `scripts/prepare_dataset.py code2code | docstrings | import-coir`. Replace the model list to score
+# other checkpoints.
+models:
+  - configs/models/granite-r2.yaml
+tasks:
+  - {name: code2code-tests-python, type: retrieval, path: data/eval/code2code-tests-python}
+  - {name: code2code-calls-python, type: retrieval, path: data/eval/code2code-calls-python}
+  - {name: code2code-calls-typescript, type: retrieval, path: data/eval/code2code-calls-typescript}
+  - {name: docstrings-python, type: retrieval, path: data/eval/docstrings-python}
+  - {name: docstrings-typescript, type: retrieval, path: data/eval/docstrings-typescript}
+  - {name: cosqa, type: retrieval, path: data/eval/cosqa}
+  - {name: coir-stackoverflow-qa, type: retrieval, path: data/eval/coir/stackoverflow-qa}
+  - {name: coir-csn-python, type: retrieval, path: data/eval/coir/csn-native-python}
+  - {name: coir-csn-javascript, type: retrieval, path: data/eval/coir/csn-native-javascript}
+  - {name: coir-csn-ccr-python, type: retrieval, path: data/eval/coir/csn-ccr-python}
+  - {name: coir-csn-ccr-javascript, type: retrieval, path: data/eval/coir/csn-ccr-javascript}
+  - {name: coir-apps, type: retrieval, path: data/eval/coir/apps}
+output_dir: artifacts/eval/retrieval
+ks: [1, 5, 10, 20]
+retrieval_modes: [dense]
+primary_metric: ndcg@10
+bootstrap_samples: 1000
+seed: 13
+cache_dir: artifacts/cache

@@ -1,4 +1,4 @@
-"""Command-line interface: `codeintel {index,search,evaluate,validate,train,export}`."""
+"""Command-line interface: `codeintel {index,search,mcp,evaluate,validate,train,export}`."""
 
 from __future__ import annotations
 
@@ -54,6 +54,12 @@ def cmd_search(args: argparse.Namespace) -> int:
         for h in aggregate(hits, index.chunks, key, k=args.k):
             print(f"{h.rank:3d}  {h.score:.4f}  {h.key}")
     return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from codeintel.agent.server import run
+
+    return run(args)
 
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
@@ -134,6 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--level", choices=["chunk", "file", "symbol"], default="chunk")
     p.add_argument("-k", type=int, default=10)
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("mcp", help="serve code search to coding agents over MCP (stdio)")
+    from codeintel.agent.server import add_arguments
+
+    add_arguments(p)
+    p.set_defaults(func=cmd_mcp)
 
     p = sub.add_parser("evaluate", help="run an evaluation config")
     p.add_argument("config")

@@ -30,6 +30,10 @@ onnx = [
     "onnx>=1.16",
     "onnxruntime>=1.18",
 ]
+# `codeintel mcp`: code search for coding agents.
+mcp = [
+    "mcp>=2.3",
+]
 datasets = [
     "datasets>=2.19",
 ]

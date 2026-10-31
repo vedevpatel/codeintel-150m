@@ -7,10 +7,16 @@ Per file:
   * module-level code between top-level definitions (imports, constants, scripts) becomes module chunks;
   * anything exceeding the size limits is split into overlapping line windows;
   * files without a parser are split into line windows.
+
+With `ChunkerConfig(context="rich")` each chunk also carries the context a reader would need: the enclosing
+class's signature and the first sentence of its docstring, and the first sentence of the module docstring
+(Python). The default `"basic"` header is just `path::Qualified.name`.
 """
 
 from __future__ import annotations
 
+import ast
+import re
 import textwrap
 from dataclasses import dataclass
 
@@ -29,6 +35,20 @@ class ChunkerConfig:
     min_module_lines: int = 2
     include_path_header: bool = True
     class_skeletons: bool = True
+    context: str = "basic"  # "basic" | "rich"
+    context_doc_chars: int = 140
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
+
+
+def first_sentence(text: str, max_chars: int = 140) -> str:
+    """First sentence of a docstring or comment, whitespace-collapsed and capped."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    sentence = _SENTENCE_END.split(text, maxsplit=1)[0]
+    return sentence if len(sentence) <= max_chars else sentence[: max_chars - 1].rstrip() + "…"
 
 
 @dataclass
@@ -62,8 +82,30 @@ class Chunker:
         label = f"{source.path}::{symbol}" if symbol else source.path
         return f"{c} {label}{part}\n"
 
+    def _context_lines(self, source: SourceFile, *parts: str) -> str:
+        c = COMMENT_PREFIX.get(source.language, "//")
+        return "".join(f"{c} {p}\n" for p in parts if p)
+
+    def _module_context(self, source: SourceFile) -> str:
+        if self.config.context != "rich" or source.language != "python":
+            return ""
+        try:
+            doc = ast.get_docstring(ast.parse(source.text)) or ""
+        except (SyntaxError, ValueError):
+            return ""
+        summary = first_sentence(doc, self.config.context_doc_chars)
+        return f"module: {summary}" if summary else ""
+
+    def _class_context(self, parent: Symbol | None) -> str:
+        if self.config.context != "rich" or parent is None or parent.kind not in SKELETON_KINDS:
+            return ""
+        summary = first_sentence(parent.docstring, self.config.context_doc_chars)
+        signature = parent.signature[:160].rstrip().rstrip(":{").rstrip()
+        return f"in {signature}" + (f" -- {summary}" if summary else "")
+
     def make_chunk(
-        self, source: SourceFile, start: int, end: int, kind: str, symbol: str | None, code: str, part: str = ""
+        self, source: SourceFile, start: int, end: int, kind: str, symbol: str | None, code: str, part: str = "",
+        context: str = "",
     ) -> Chunk:
         body = textwrap.dedent(code).strip("\n")
         if len(body) > self.config.max_chars:
@@ -76,7 +118,7 @@ class Chunker:
             end_line=end,
             kind=kind,
             symbol=symbol,
-            text=self._header(source, symbol, part) + body,
+            text=self._header(source, symbol, part) + context + body,
             code=code,
         )
 
@@ -101,18 +143,21 @@ class Chunker:
         return len(span) <= self.config.max_lines and sum(len(x) + 1 for x in span) <= self.config.max_chars
 
     def _emit_span(
-        self, source: SourceFile, lines: list[str], start: int, end: int, kind: str, symbol: str | None
+        self, source: SourceFile, lines: list[str], start: int, end: int, kind: str, symbol: str | None,
+        context: str = "",
     ) -> list[Chunk]:
         if self._fits(lines, start, end):
-            return [self.make_chunk(source, start, end, kind, symbol, "\n".join(lines[start - 1 : end]))]
+            return [self.make_chunk(source, start, end, kind, symbol, "\n".join(lines[start - 1 : end]), context=context)]
         ranges = self._window_ranges(lines, start, end)
         return [
-            self.make_chunk(source, s, e, kind, symbol, "\n".join(lines[s - 1 : e]), part=f" (part {k}/{len(ranges)})")
+            self.make_chunk(
+                source, s, e, kind, symbol, "\n".join(lines[s - 1 : e]), part=f" (part {k}/{len(ranges)})", context=context
+            )
             for k, (s, e) in enumerate(ranges, 1)
         ]
 
     # -- structure-aware chunks ------------------------------------------------------------------
-    def _skeleton(self, source: SourceFile, lines: list[str], node: _Node) -> Chunk | None:
+    def _skeleton(self, source: SourceFile, lines: list[str], node: _Node, context: str = "") -> Chunk | None:
         sym = node.symbol
         out: list[str] = []
         line = sym.start_line
@@ -139,25 +184,28 @@ class Chunker:
         code = "\n".join(out)
         if len(out) > self.config.max_lines * 2:
             code = "\n".join(out[: self.config.max_lines * 2])
-        return self.make_chunk(source, sym.start_line, sym.end_line, "skeleton", sym.qualified_name, code)
+        return self.make_chunk(source, sym.start_line, sym.end_line, "skeleton", sym.qualified_name, code, context=context)
 
-    def _chunk_node(self, source: SourceFile, lines: list[str], node: _Node) -> list[Chunk]:
+    def _chunk_node(
+        self, source: SourceFile, lines: list[str], node: _Node, module_ctx: str = "", parent: Symbol | None = None
+    ) -> list[Chunk]:
         sym = node.symbol
+        context = self._context_lines(source, module_ctx, self._class_context(parent))
         if not node.children:
-            return self._emit_span(source, lines, sym.start_line, sym.end_line, sym.kind, sym.qualified_name)
+            return self._emit_span(source, lines, sym.start_line, sym.end_line, sym.kind, sym.qualified_name, context)
         chunks: list[Chunk] = []
         if self.config.class_skeletons and sym.kind in SKELETON_KINDS:
-            skeleton = self._skeleton(source, lines, node)
+            skeleton = self._skeleton(source, lines, node, self._context_lines(source, module_ctx))
             if skeleton is not None:
                 chunks.append(skeleton)
         elif sym.kind not in SKELETON_KINDS:
             # A function with nested definitions (rare outside Python closures): keep it whole.
-            return self._emit_span(source, lines, sym.start_line, sym.end_line, sym.kind, sym.qualified_name)
+            return self._emit_span(source, lines, sym.start_line, sym.end_line, sym.kind, sym.qualified_name, context)
         for child in node.children:
-            chunks.extend(self._chunk_node(source, lines, child))
+            chunks.extend(self._chunk_node(source, lines, child, module_ctx, sym))
         return chunks
 
-    def _module_chunks(self, source: SourceFile, lines: list[str], roots: list[_Node]) -> list[Chunk]:
+    def _module_chunks(self, source: SourceFile, lines: list[str], roots: list[_Node], module_ctx: str = "") -> list[Chunk]:
         covered = [False] * (len(lines) + 2)
         for node in roots:
             for i in range(node.symbol.start_line, node.symbol.end_line + 1):
@@ -179,7 +227,7 @@ class Chunker:
                     s += 1
                 while e > s and not lines[e - 1].strip():
                     e -= 1
-                chunks.extend(self._emit_span(source, lines, s, e, "module", None))
+                chunks.extend(self._emit_span(source, lines, s, e, "module", None, self._context_lines(source, module_ctx)))
             i = j + 1
         return chunks
 
@@ -190,8 +238,9 @@ class Chunker:
         if symbols is None:
             symbols = parse_symbols(source)
         roots = _build_tree(symbols)
-        chunks = self._module_chunks(source, lines, roots)
+        module_ctx = self._module_context(source)
+        chunks = self._module_chunks(source, lines, roots, module_ctx)
         for node in roots:
-            chunks.extend(self._chunk_node(source, lines, node))
+            chunks.extend(self._chunk_node(source, lines, node, module_ctx))
         chunks.sort(key=lambda c: (c.start_line, c.kind != "skeleton", c.end_line))
         return chunks

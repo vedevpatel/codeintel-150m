@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -42,46 +41,68 @@ def code_tokens(text: str) -> list[str]:
     return [_stem(t) for t in out if len(t) > 1 and t not in STOPWORDS]
 
 
+TermArrays = tuple[np.ndarray, np.ndarray]  # (term ids, term frequencies) of one document
+
+
+def term_arrays(counts: Counter, vocab: dict[str, int]) -> TermArrays:
+    """One document's term counts as parallel arrays over `vocab` (grown in place)."""
+    ids = np.fromiter((vocab.setdefault(t, len(vocab)) for t in counts), dtype=np.int32, count=len(counts))
+    return ids, np.fromiter(counts.values(), dtype=np.float32, count=len(counts))
+
+
 class BM25Index:
+    """Okapi BM25 over a CSC-style postings layout: for term t, `_docs/_tfs[_starts[t]:_starts[t + 1]]`."""
+
     def __init__(
         self,
-        documents: Sequence[str],
+        documents: Sequence[str] | None = None,
         k1: float = 1.2,
         b: float = 0.75,
         tokenizer: Callable[[str], list[str]] = code_tokens,
+        *,
+        vocab: dict[str, int] | None = None,
+        arrays: Sequence[TermArrays] | None = None,
     ):
+        """Index `documents`, or per-document `arrays` (see `term_arrays`) over a shared `vocab`.
+
+        The array form skips all per-term Python work, which matters when the same chunks are re-indexed for
+        many repository snapshots (see `codeintel.evaluation.runner.SnapshotLoader`).
+        """
         self.k1, self.b, self.tokenizer = k1, b, tokenizer
-        self.n_docs = len(documents)
-        vocab: dict[str, int] = {}
-        postings_docs: list[list[int]] = []
-        postings_tfs: list[list[int]] = []
-        lengths = np.zeros(self.n_docs, dtype=np.float32)
-        for doc_id, text in enumerate(documents):
-            counts = Counter(tokenizer(text))
-            lengths[doc_id] = sum(counts.values())
-            for term, tf in counts.items():
-                tid = vocab.setdefault(term, len(vocab))
-                if tid == len(postings_docs):
-                    postings_docs.append([])
-                    postings_tfs.append([])
-                postings_docs[tid].append(doc_id)
-                postings_tfs[tid].append(tf)
+        if arrays is None:
+            vocab = {}
+            arrays = [term_arrays(Counter(tokenizer(text)), vocab) for text in documents or []]
+        assert vocab is not None
         self.vocab = vocab
-        self.doc_ids = [np.asarray(d, dtype=np.int32) for d in postings_docs]
-        self.tfs = [np.asarray(t, dtype=np.float32) for t in postings_tfs]
-        avg = float(lengths.mean()) if self.n_docs else 0.0
-        self.norm = (k1 * (1 - b + b * lengths / avg)).astype(np.float32) if avg > 0 else np.full(self.n_docs, k1, np.float32)
-        self.idf = np.asarray(
-            [math.log(1 + (self.n_docs - len(d) + 0.5) / (len(d) + 0.5)) for d in postings_docs], dtype=np.float32
-        )
+        n = self.n_docs = len(arrays)
+        n_terms = len(vocab)
+        lengths = np.fromiter((len(ids) for ids, _ in arrays), dtype=np.int64, count=n)
+        if n and lengths.sum():
+            all_ids = np.concatenate([ids for ids, _ in arrays])
+            all_tf = np.concatenate([tf for _, tf in arrays])
+        else:
+            all_ids, all_tf = np.zeros(0, np.int32), np.zeros(0, np.float32)
+        doc_idx = np.repeat(np.arange(n, dtype=np.int32), lengths)
+        order = np.argsort(all_ids, kind="stable")  # stable: postings stay in ascending document order
+        self._docs = doc_idx[order]
+        self._tfs = all_tf[order].astype(np.float32, copy=False)
+        df = np.bincount(all_ids, minlength=n_terms)
+        self._starts = np.concatenate([[0], np.cumsum(df)])
+        doc_len = np.bincount(doc_idx, weights=all_tf, minlength=n).astype(np.float32)
+        avg = float(doc_len.mean()) if n else 0.0
+        self.norm = (k1 * (1 - b + b * doc_len / avg)).astype(np.float32) if avg > 0 else np.full(n, k1, np.float32)
+        self.idf = np.log(1 + (n - df + 0.5) / (df + 0.5)).astype(np.float32)
 
     def scores(self, query: str) -> np.ndarray:
         scores = np.zeros(self.n_docs, dtype=np.float32)
         for term, qtf in Counter(self.tokenizer(query)).items():
             tid = self.vocab.get(term)
-            if tid is None:
+            if tid is None or tid >= len(self.idf):  # the shared vocabulary may have grown after this index
                 continue
-            docs, tf = self.doc_ids[tid], self.tfs[tid]
+            lo, hi = self._starts[tid], self._starts[tid + 1]
+            if lo == hi:
+                continue
+            docs, tf = self._docs[lo:hi], self._tfs[lo:hi]
             scores[docs] += qtf * self.idf[tid] * tf * (self.k1 + 1) / (tf + self.norm[docs])
         return scores
 

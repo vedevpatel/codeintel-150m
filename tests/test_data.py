@@ -148,3 +148,63 @@ def test_licence_checker_follows_history(git_repo):
     git(git_repo, "commit", "-q", "-am", "Relicense under the GPL")
     assert "GPL-family" in checker.problem("HEAD")
     assert checker.problem("HEAD~1") is None
+
+
+def test_manifest_rejects_repo_in_two_roles(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    import pytest
+
+    spec = importlib.util.spec_from_file_location("prepare_dataset", Path(__file__).parent.parent / "scripts" / "prepare_dataset.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    manifest = tmp_path / "repos.yaml"
+    manifest.write_text(
+        "repos:\n"
+        "  - {name: a, url: https://github.com/o/a, language: python, license: MIT, role: eval}\n"
+        "  - {name: a-train, url: https://github.com/O/a.git, language: python, license: MIT, role: train}\n"
+    )
+    with pytest.raises(SystemExit, match="more than one role"):
+        module.load_manifest(str(manifest))
+
+
+def _load_prepare_dataset():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("prepare_dataset", Path(__file__).parent.parent / "scripts" / "prepare_dataset.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _case(repo, mention, language="python", i=0):
+    from codeintel.data.schemas import LocalizationCase
+
+    return LocalizationCase(id=f"{repo}#{i}", repo=repo, query="q" * 50, gold_files=["a.py"], language=language,
+                            tags={"language": language, "mentions": mention})
+
+
+def test_case_language_comes_from_gold_files():
+    from codeintel.data.schemas import LocalizationCase
+
+    module = _load_prepare_dataset()
+    make = lambda files: LocalizationCase(id="x", repo="r", query="q", gold_files=files)  # noqa: E731
+    assert module._case_language(make(["a/b.py"])) == "python"
+    assert module._case_language(make(["a/b.ts", "c.tsx"])) == "typescript"
+    assert module._case_language(make(["a/b.py", "c.ts"])) is None
+
+
+def test_stratum_report_checks_floor_repos_and_share(capsys):
+    module = _load_prepare_dataset()
+    # 4 repos x 80 descriptive: floor passes, but only 4 repos contribute and the largest holds 25%.
+    even = [_case(f"r{r}", "descriptive", i=i) for r in range(4) for i in range(80)]
+    assert not module._stratum_report(even, floor=300, min_repos=8, max_share=0.25, min_per_repo=10)
+    out = capsys.readouterr().out
+    assert "FAIL  repos with >= 10 descriptive >= 8" in out and "PASS  descriptive >= 300" in out
+    spread = [_case(f"r{r}", "descriptive", i=i) for r in range(10) for i in range(35)]
+    assert module._stratum_report(spread, floor=300, min_repos=8, max_share=0.25, min_per_repo=10)
+    skewed = [_case("big", "descriptive", i=i) for i in range(200)] + [_case(f"r{r}", "descriptive", i=i) for r in range(9) for i in range(14)]
+    assert not module._stratum_report(skewed, floor=300, min_repos=8, max_share=0.25, min_per_repo=10)
+    assert "FAIL  largest repo share <= 25%" in capsys.readouterr().out

@@ -1,0 +1,16 @@
+# codesage/codesage-small-v2 (130M, Apache-2.0) at the SFconvertbot safetensors revision (refs/pr/4); its .py files are
+# identical to main @ 4844c2f2. Reviewed remote code: pure PyTorch; the tokenizer only reads its vocab/merges files.
+# Comparison model.
+name: codesage-small
+adapter: codesage
+repo_id: codesage/codesage-small-v2
+revision: 1cafaef05b11cac4493cac6ff8f2bc3113f68c40
+trust_remote_code: true
+remote_code_sha256:
+  config_codesage.py: 4f052f7b2f58dfdba733dcfcee2b30922d38cd28b7cc87fead82714a51e844c0
+  modeling_codesage.py: 394729b0da3a568482ac3729d9765bc32e9d28c28853bbddea73392af04b7b31
+  tokenization_codesage.py: 7888eeade965b67f64609f2d556ab2726fc27eaf81754e5528b1b74411beeba4
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

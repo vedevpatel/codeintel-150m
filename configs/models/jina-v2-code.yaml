@@ -1,0 +1,16 @@
+# jinaai/jina-embeddings-v2-base-code @ 516f4baf13dec4ddddda8631e019b5737c8bc250 (161M, Apache-2.0), with its modeling code
+# from jinaai/jina-bert-v2-qk-post-norm @ 3baf9e3ac750e76e8edd3019170176884695fb94 vendored into the local snapshot (the
+# only change: auto_map points at the local files). Reviewed: pure PyTorch; network access only in its own encode()
+# helper, which this project never calls. Comparison model.
+name: jina-v2-code
+adapter: jina-v2-code
+repo_id: jinaai/jina-embeddings-v2-base-code
+local_dir: artifacts/vendor/jina-embeddings-v2-base-code
+trust_remote_code: true
+remote_code_sha256:
+  configuration_bert.py: d018de11bcb62cedf436c8876459e5cd119d1faf72bc107338576a6d1b8eeea5
+  modeling_bert.py: 8f96ef0576401f6b996f9b72ad34e13190139eec1195767516485876434bb612
+device: auto
+dtype: auto
+max_length: 1024
+batch_size: 32

@@ -51,6 +51,38 @@ Documents are code definitions prefixed with a one-line `path::QualifiedName` he
 syntax. Queries are raw issue text, and no prompt is needed. Fusing dense scores with BM25 (reciprocal-rank fusion,
 dense weight 2) adds about 0.03 nDCG@10 on issue localization.
 
+## Use with coding agents (MCP)
+
+`codeintel mcp` gives Claude Code, Codex, Cursor and other MCP clients semantic search over the repository they are
+working in. The agent passes an issue or a plain-language description, and gets back ranked functions and classes
+with file paths, line ranges and snippets.
+
+```bash
+# Claude Code (run in the repository)
+claude mcp add codeintel -- uvx --from "codeintel[mcp] @ git+https://github.com/vedevpatel/codeintel-150m" codeintel mcp .
+```
+
+```toml
+# Codex: ~/.codex/config.toml
+[mcp_servers.codeintel]
+command = "uvx"
+args = ["--from", "codeintel[mcp] @ git+https://github.com/vedevpatel/codeintel-150m", "codeintel", "mcp", "."]
+```
+
+```json
+// Cursor: .cursor/mcp.json
+{"mcpServers": {"codeintel": {"command": "uvx", "args": ["--from",
+  "codeintel[mcp] @ git+https://github.com/vedevpatel/codeintel-150m", "codeintel", "mcp", "${workspaceFolder}"]}}}
+```
+
+The server runs locally over stdio and opens no network port. It downloads the model once, indexes the repository in
+the background at startup, and keeps the index in `~/.cache/codeintel`, outside the repository. After that, edits are
+picked up on the next search and only changed code is re-embedded. It runs on CUDA, Apple Silicon (MPS) or CPU;
+`--backend onnx` uses the INT8 model instead.
+
+Tools: `search_code(query, k, level)` returns symbol- or file-level results; `index_status` and `reindex` report on and
+refresh the index.
+
 ## Setup
 
 ```bash
@@ -124,7 +156,7 @@ down-projections in fp32. Both are checked against PyTorch.
 ```
 configs/        model, training, evaluation and data-source configs
 scripts/        data preparation and mining, GPU job runners, release builder
-src/codeintel/  models, indexing, retrieval, evaluation, data and training
+src/codeintel/  models, indexing, retrieval, evaluation, data, training and the agent (MCP) server
 tests/          offline tests, run against a small Python + TypeScript fixture repository
 docs/           evaluation design and benchmark results
 ```

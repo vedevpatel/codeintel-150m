@@ -12,9 +12,40 @@
 # Evaluation issues are taken from 2025-03-01 onwards. Very large monorepos are avoided to keep indexing cheap.
 shallow_since: "2025-01-01"
 repos:
+  # Python
   - {name: pytest, url: https://github.com/pytest-dev/pytest, language: python, license: MIT, role: eval}
   - {name: pip, url: https://github.com/pypa/pip, language: python, license: MIT, role: eval}
   - {name: textual, url: https://github.com/Textualize/textual, language: python, license: MIT, role: eval}
+  - {name: mypy, url: https://github.com/python/mypy, language: python, license: MIT AND PSF-2.0, role: eval}
+  - {name: conan, url: https://github.com/conan-io/conan, language: python, license: MIT, role: eval}
+  - {name: scrapy, url: https://github.com/scrapy/scrapy, language: python, license: BSD-3-Clause, role: eval}
+  - {name: xarray, url: https://github.com/pydata/xarray, language: python, license: Apache-2.0, role: eval}
+  - {name: pydantic, url: https://github.com/pydantic/pydantic, language: python, license: MIT, role: eval}
+  - {name: pylint, url: https://github.com/pylint-dev/pylint, language: python, license: GPL-2.0-or-later, role: eval}
+  - {name: celery, url: https://github.com/celery/celery, language: python, license: BSD-3-Clause, role: eval}
+  - {name: beets, url: https://github.com/beetbox/beets, language: python, license: MIT, role: eval}
+  - {name: tox, url: https://github.com/tox-dev/tox, language: python, license: MIT, role: eval}
+  - {name: scikit-learn, url: https://github.com/scikit-learn/scikit-learn, language: python, license: BSD-3-Clause, role: eval}
+  - {name: astropy, url: https://github.com/astropy/astropy, language: python, license: BSD-3-Clause, role: eval}
+  - {name: matplotlib, url: https://github.com/matplotlib/matplotlib, language: python, license: LicenseRef-Matplotlib, role: eval}
+  - {name: networkx, url: https://github.com/networkx/networkx, language: python, license: BSD-3-Clause, role: eval}
+  - {name: black, url: https://github.com/psf/black, language: python, license: MIT, role: eval}
+  - {name: ipython, url: https://github.com/ipython/ipython, language: python, license: BSD-3-Clause, role: eval}
+  - {name: sympy, url: https://github.com/sympy/sympy, language: python, license: LicenseRef-SymPy, role: eval}
+  - {name: langchain, url: https://github.com/langchain-ai/langchain, language: python, license: MIT, role: eval}
+  - {name: aiohttp, url: https://github.com/aio-libs/aiohttp, language: python, license: Apache-2.0, role: eval}
+  - {name: datasets, url: https://github.com/huggingface/datasets, language: python, license: Apache-2.0, role: eval}
+  # TypeScript
   - {name: vue-core, url: https://github.com/vuejs/core, language: typescript, license: MIT, role: eval}
   - {name: hono, url: https://github.com/honojs/hono, language: typescript, license: MIT, role: eval}
   - {name: vite, url: https://github.com/vitejs/vite, language: typescript, license: MIT, role: eval}
+  - {name: vitest, url: https://github.com/vitest-dev/vitest, language: typescript, license: MIT, role: eval}
+  - {name: astro, url: https://github.com/withastro/astro, language: typescript, license: MIT, role: eval}
+  - {name: nuxt, url: https://github.com/nuxt/nuxt, language: typescript, license: MIT, role: eval}
+  - {name: typescript-eslint, url: https://github.com/typescript-eslint/typescript-eslint, language: typescript, license: MIT, role: eval}
+  - {name: mermaid, url: https://github.com/mermaid-js/mermaid, language: typescript, license: MIT, role: eval}
+  - {name: tiptap, url: https://github.com/ueberdosis/tiptap, language: typescript, license: MIT, role: eval}
+  - {name: zod, url: https://github.com/colinhacks/zod, language: typescript, license: MIT, role: eval}
+  - {name: playwright, url: https://github.com/microsoft/playwright, language: typescript, license: Apache-2.0, role: eval}
+  - {name: ant-design, url: https://github.com/ant-design/ant-design, language: typescript, license: MIT, role: eval}
+  - {name: tanstack-router, url: https://github.com/TanStack/router, language: typescript, license: MIT, role: eval}
